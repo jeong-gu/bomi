@@ -1,0 +1,13 @@
+fastapi
+pydantic
+langchain_huggingface
+langchain_chroma
+dotenv
+openai
+streamlit
+langchain_community
+streamlit_lottie
+passlib
+jose
+python-jose
+matplotlib
