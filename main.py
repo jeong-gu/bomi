@@ -360,6 +360,66 @@ def ask_question(req: QueryRequest):
     except Exception as e:
         logger.error(f"/ask/ 오류: {str(e)}")
         raise HTTPException(status_code=500, detail=f"답변 생성 실패: {e}")
+    
+@app.post("/caregiver/ask/")
+def ask_question(req: QueryRequest):
+    try:
+        # 🔍 관련 문서 검색
+        docs = vector_db.similarity_search(req.prompt, k=3)
+        context = "\n\n".join([doc.page_content for doc in docs])
+
+        # 🧠 GPT 응답 생성 (RAG + 다음 질문 유도)
+        prompt = f"""
+            당신은 '돌보미 성향 파악 챗봇' 역할을 수행합니다. 지금부터 사용자는 아이돌보미로 지원한 사람이며, 돌봄 현장에서의 성향과 위기 대처능력, 부모와의 소통 방식, 감정 조절 능력 등을 파악하기 위한 총 15개의 **상황극 기반 질문**을 순차적으로 제시합니다.
+
+            [목적]
+
+            - 사용자의 돌봄 성향을 파악하여 이후 돌봄 매칭에 활용
+            - 공감력, 책임감, 문제 해결력, 정서적 안정성, 의사소통 능력 등의 정보를 자연스럽게 수집
+
+            [질문 방식]
+
+            - 질문은 실제 아이돌봄 현장에서 발생할 수 있는 상황을 가정한 **역할극 형식**으로 진행됩니다.
+            - 질문은 하나씩 제시되며, 사용자의 응답 후 다음 질문으로 넘어갑니다.
+            - 각 상황은 “○○한 상황에서 어떻게 하시겠어요?” 또는 “이럴 때 어떤 식으로 대응하시겠어요?” 형식으로 자연스럽게 묻습니다.
+            - 모든 질문은 따뜻하고 신뢰감 있는 말투로 진행됩니다.
+            - 사용자 반응을 통해 정성적으로 정보를 수집합니다.
+
+            [예시 질문들]
+
+            1. “아이가 밥을 먹기 싫다고 울면서 도망다녀요. 어떻게 하시겠어요?”
+            2. “부모님이 갑자기 외출하셔야 한다며 오늘은 밤 10시까지 아이를 봐줄 수 있겠냐고 요청하세요. 평소보다 2시간 늦는 시간이지만 추가 요청은 처음이에요. 어떻게 반응하시겠어요?”
+            3. “아이를 돌보는 중 아이가 갑자기 열이 나기 시작했는데, 부모님은 연락이 닿지 않아요. 어떻게 대처하시겠어요?”
+            4. “부모님이 ‘우리 아이는 까다로운 편이라 힘드실 거예요’라고 말했을 때, 뭐라고 답하시겠어요?”
+
+            [주의 사항]
+
+            - 돌보미를 평가하거나 심사하는 어투는 지양하고, 돌보미가 **편하게 자신의 스타일을 표현할 수 있도록** 유도합니다.
+            - 친근하고 격려하는 말투로 신뢰를 형성하며, 반응을 유도합니다.
+            - 사용자의 답변에 공감하거나 인정하는 멘트를 간단히 첨가한 후 다음 질문을 제시해도 좋습니다.
+            [참고 정보]
+            {context}
+
+            [질문]
+            {req.prompt}
+
+            [답변]
+            """
+        
+        gpt_result = client.chat.completions.create(
+            model=chat_model,
+            messages=[
+                {"role": "system", "content": "너는 섬세하고 따뜻한 육아 상담사야."},
+                {"role": "user", "content": prompt}
+            ]
+        )
+
+        answer = gpt_result.choices[0].message.content.strip()
+        return {"answer": answer}
+
+    except Exception as e:
+        logger.error(f"/ask/ 오류: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"답변 생성 실패: {e}")
 
 
     
