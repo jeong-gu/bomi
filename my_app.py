@@ -21,7 +21,7 @@ if "emotion_history" not in st.session_state:
 ############################################
 st.set_page_config(page_title="나만의 아이돌, 보미", page_icon="☁️", layout="centered")
 
-RAG_API_URL = "http://localhost:8005/ask/"
+RAG_API_URL = "http://localhost:8005/rag/"
 
 # --------------------------- 세션 기본값 ---------------------------
 if "page" not in st.session_state:
@@ -1040,7 +1040,13 @@ def page_recommend_result():
 def page_chat_talk():
     # ✅ 상태 변수 설정
     if "chat_messages" not in st.session_state:
-        st.session_state.chat_messages = []  # 수다 대화 상태 변수 추가
+        st.session_state.chat_messages = [{
+            "role": "assistant",
+            "content": (
+                "안녕하세요 😊\n 무엇이든 물어보세요!!"
+            )
+        }]  # 수다 대화 상태 변수 추가
+        
     if "last_chat_input" not in st.session_state:
         st.session_state.last_chat_input = None  
     if "waiting_for_chat_response" not in st.session_state:

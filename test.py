@@ -54,7 +54,7 @@ for i in range(30):
     # 1. users 테이블 삽입
     cur.execute("""
         INSERT INTO users (username, email, hashed_password, role, phone, age, created_at)
-        VALUES (?, ?, ?, 'care', ?, ?, ?)
+        VALUES (?, ?, ?, '돌보미미', ?, ?, ?)
     """, (username, email, hashed_pw, phone, age, created_at))
     user_id = cur.lastrowid
 

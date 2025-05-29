@@ -546,7 +546,15 @@ def analyze_personality_from_chat(data: ChatHistoryRequest, db: Session = Depend
         # (2) JSON 추출 시 괄호 매칭 보완
         match = re.search(r"\{[\s\S]*\}", raw)
         if not match:
-            raise HTTPException(status_code=400, detail="GPT 응답에서 JSON 형식을 찾을 수 없습니다.")
+            print("❗ GPT 응답에 JSON 형식이 없어 기본 벡터로 대체합니다.")
+
+            # 기본 벡터 생성 (항목 수 기반)
+            default_vectors = {
+                key: [0.1] * len(value)
+                for key, value in categories.items()
+            }
+
+            return JSONResponse(content={"vectors": default_vectors})
 
         json_str = match.group()
         if not json_str.strip().endswith("}"):
