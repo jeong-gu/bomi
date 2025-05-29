@@ -136,14 +136,24 @@ body {
 
 
 
+
 def page_caregiver_personality():
-    """돌보미 성향 자가진단 챗 인터페이스"""
+    import streamlit as st
+    import requests
+    import json
+
     if "caregiver_self_messages" not in st.session_state:
         st.session_state.caregiver_self_messages = [{
             "role": "assistant",
             "content": (
-                "안녕하세요 😊 어떤 돌보미이신가요?\n"
-                "예: '꼼꼼하게 약속을 지키는 편이에요', '아이의 감정에 귀 기울여요'"
+                "안녕하세요\n"
+                "돌보미로서의 나를 소개해보는 시간이에요.\n"
+                "내가 아이들과 어떻게 지내는 편인지, 어떤 성향인지 자유롭게 이야기해 주세요!\n\n"
+                "예시:\n"
+                "- '약속은 꼭 지키려고 해요'\n"
+                "- '아이 눈높이에 맞춰서 대화하려고 노력해요'\n"
+                "- '장난꾸러기 아이들도 귀엽게 봐주는 편이에요'\n\n"
+                "자유롭게 말씀해 주시면, 당신만의 따뜻한 돌봄 스타일을 분석해드릴게요 "
             )
         }]
     if "last_caregiver_self_input" not in st.session_state:
@@ -152,7 +162,7 @@ def page_caregiver_personality():
         st.session_state.waiting_for_trait_response = False
 
     st.markdown("<h3 style='text-align:center;'>📝 돌보미 성향 자가진단</h3>", unsafe_allow_html=True)
-    col_text, col_save = st.columns([5,1])
+    col_text, col_save = st.columns([5, 1])
     with col_save:
         if st.button("저장"):
             history = [m["content"] for m in st.session_state.caregiver_self_messages if m["role"] == "user"]
@@ -166,55 +176,72 @@ def page_caregiver_personality():
                             json={"email": st.session_state.user_email, "history": history}
                         )
                         res1.raise_for_status()
-                        traits = res1.json().get("traits", {})
+                        vectors = res1.json().get("vectors", {})
+                        judged = res1.json().get("judged", {})
 
-                        # 누락된 항목 보완 (모든 trait이 빠졌을 경우도 대응)
-                        default_traits = {
-                            "diligent": 0.1,
-                            "sociable": 0.1,
-                            "cheerful": 0.1,
-                            "warm": 0.1,
-                            "positive": 0.1,
-                            "observant": 0.1
+                        categories = [
+                            "parenting_style_vector",
+                            "personality_traits_vector",
+                            "communication_style_vector",
+                            "caregiving_attitude_vector",
+                            "handling_situations_vector",
+                            "empathy_traits_vector",
+                            "trust_time_vector"
+                        ]
+
+                        category_to_length = {
+                            "parenting_style_vector": 8,
+                            "personality_traits_vector": 10,
+                            "communication_style_vector": 5,
+                            "caregiving_attitude_vector": 6,
+                            "handling_situations_vector": 4,
+                            "empathy_traits_vector": 4,
+                            "trust_time_vector": 3
                         }
-                        for k, v in default_traits.items():
-                            traits[k] = traits.get(k, v)
+
+                        for cat in categories:
+                            if cat not in vectors:
+                                vectors[cat] = [0.0] * category_to_length[cat]
+                            if cat not in judged:
+                                judged[cat] = False
 
                         res2 = requests.post(
-                            "http://localhost:8005/caregiver/update-traits",
-                            json={"email": st.session_state.user_email, **traits}
+                            "http://localhost:8005/caregiver/update-vectors",
+                            json={"email": st.session_state.user_email, **vectors}
                         )
                         res2.raise_for_status()
 
-                        st.success("성향 점수가 성공적으로 저장되었어요! 🎉\n홈 화면으로 이동합니다.")
-                        st.session_state.page = "start"
-                        st.rerun()
+                        # 판단되지 않은 항목 안내
+                        uncertain = [cat for cat in categories if not judged.get(cat, True)]
+                        if uncertain:
+                            st.warning(f"아직 충분히 파악되지 않은 성향 항목이 있어요: {', '.join(uncertain)}\n좀 더 다양한 성향을 표현해 주세요!")
+                        else:
+                            st.success("성향 벡터가 성공적으로 저장되었어요! 🎉\n홈 화면으로 이동합니다.")
+                            st.session_state.page = "start"
+                            st.rerun()
 
                     except requests.exceptions.RequestException as e:
                         st.error(f"서버 요청 중 오류 발생: {e}")
                     except Exception as e:
                         st.error(f"예기치 않은 오류: {e}")
 
-
-
-
-    # — 챗 기록 렌더링 —
+    # 채팅 렌더링
     html = '<div class="chat-container">'
     if st.session_state.waiting_for_trait_response:
         html += '<div class="loading-bubble">답변 생성 중...</div>'
     for msg in st.session_state.caregiver_self_messages:
-        cls = "user-bubble" if msg["role"]=="user" else "assistant-bubble"
-        tag = "Q:" if msg["role"]=="user" else "A:"
+        cls = "user-bubble" if msg["role"] == "user" else "assistant-bubble"
+        tag = "Q:" if msg["role"] == "user" else "A:"
         html += f'<div class="{cls}"><strong>{tag}</strong> {msg["content"]}</div>'
     html += "</div>"
     st.markdown(html, unsafe_allow_html=True)
 
-    # — 입력창 —
+    # 입력창
     def _on_enter():
         ui = st.session_state.caregiver_self_input
         if not ui or ui == st.session_state.last_caregiver_self_input:
             return
-        st.session_state.caregiver_self_messages.append({"role":"user","content":ui})
+        st.session_state.caregiver_self_messages.append({"role": "user", "content": ui})
         st.session_state.last_caregiver_self_input = ui
         st.session_state.waiting_for_trait_response = True
         st.session_state.caregiver_self_input = ""
@@ -223,23 +250,20 @@ def page_caregiver_personality():
                   placeholder="성향에 대해 말씀해주세요!",
                   on_change=_on_enter)
 
-
-
-    # — GPT 호출 및 답변 표시 —
+    # GPT 응답 받기
     if st.session_state.waiting_for_trait_response:
         with st.spinner("답변 생성 중..."):
             resp = requests.post(
-                RAG_API_URL,
+                RAG_API_URL, 
                 json={"prompt": st.session_state.last_caregiver_self_input,
-                      "category":"caregiver_personality"}
+                      "category": "caregiver_personality"}
             )
         answer = resp.json().get("answer", "응답이 없습니다.")
         st.session_state.caregiver_self_messages.append(
-            {"role":"assistant","content":answer}
+            {"role": "assistant", "content": answer}
         )
         st.session_state.waiting_for_trait_response = False
         st.rerun()
-
 
 
 
@@ -1061,7 +1085,7 @@ def page_caregiver_home():
     if row1[1].button("정보용"):
         st.session_state.page = "chat"; st.rerun()
     if row1[2].button("성향분석"):
-        st.session_state.page = "recommend"; st.rerun()
+        st.session_state.page = "caregiver_personality"; st.rerun()
     if row1[3].button("요금산정"):
         st.session_state.page = "pricing"; st.rerun()
 

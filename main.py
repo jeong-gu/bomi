@@ -148,14 +148,18 @@ def register_user(req: RegisterRequest, db: Session = Depends(get_db)):
         caregiver = Caregiver(
             user_id=new_user.id,
             age=req.age,
-            # 기본값들로 trait 초기화 (0.0)
-            diligent=0.0,
-            sociable=0.0,
-            cheerful=0.0,
-            warm=0.0,
-            positive=0.0,
-            observant=0.0
+
+            # ✅ 벡터 초기값 (모두 0.0)
+            parenting_style_vector=json.dumps([0.0] * 8),
+            personality_traits_vector=json.dumps([0.0] * 10),
+            communication_style_vector=json.dumps([0.0] * 5),
+            caregiving_attitude_vector=json.dumps([0.0] * 6),
+            handling_situations_vector=json.dumps([0.0] * 4),
+            empathy_traits_vector=json.dumps([0.0] * 4),
+            trust_time_vector=json.dumps([0.0] * 3)
         )
+
+        # 돌보미 조건이 입력된 경우
         if req.conditions:
             caregiver.available_days = ",".join(req.conditions.days)
             caregiver.available_times = json.dumps(req.conditions.times)
@@ -166,14 +170,12 @@ def register_user(req: RegisterRequest, db: Session = Depends(get_db)):
         db.add(caregiver)
         db.commit()
         logger.info(f"Caregiver row created for user_id={new_user.id}")
-        
 
     return {
         "message": "회원가입 성공",
         "user_id": new_user.id,
         "role": new_user.role.value
     }
-
 
 
 @app.post("/login")
@@ -413,78 +415,155 @@ def caregiver_rag_response(req: QueryRequest):
         raise HTTPException(status_code=500, detail=f"답변 생성 실패: {e}")
 
 
-# ✅ 돌보미 성향 수치 추출 (GPT)
 from pydantic import BaseModel
-from typing import List
+from typing import List, Dict, Optional
 import json, re
+from fastapi import HTTPException, Depends
+from sqlalchemy.orm import Session
+
+# ────────────────────────────────────────────────
+# 🚩 Pydantic Models
+# ────────────────────────────────────────────────
 
 class ChatHistoryRequest(BaseModel):
     email: str
     history: List[str]
 
-class TraitScores(BaseModel):
-    diligent: float
-    sociable: float
-    cheerful: float
-    warm: float
-    positive: float
-    observant: float
+class VectorResponse(BaseModel):
+    vectors: Dict[str, List[float]]
 
-class TraitResponse(BaseModel):
-    traits: TraitScores
+class VectorUpdateRequest(BaseModel):
+    email: str
+    parenting_style_vector: Optional[List[float]] = None
+    personality_traits_vector: Optional[List[float]] = None
+    communication_style_vector: Optional[List[float]] = None
+    caregiving_attitude_vector: Optional[List[float]] = None
+    handling_situations_vector: Optional[List[float]] = None
+    empathy_traits_vector: Optional[List[float]] = None
+    trust_time_vector: Optional[List[float]] = None
 
+# ────────────────────────────────────────────────
+# 🚩 성향 추출 API
+# ────────────────────────────────────────────────
+ 
 
-import re, json
-from fastapi import HTTPException
-
-@app.post("/caregiver/personality/from-chat", response_model=TraitResponse)
-def analyze_personality_from_chat(data: ChatHistoryRequest):
+@app.post("/caregiver/personality/from-chat", response_model=VectorResponse)
+def analyze_personality_from_chat(data: ChatHistoryRequest, db: Session = Depends(get_db)):
     try:
-        # 1. 프롬프트 구성
+        # 성향 카테고리 정의
+        categories = {
+            "parenting_style_vector": [
+                "교육 중심", "정서 케어 중심", "자율성 중심", "훈육 중심",
+                "놀이 중심", "안전/보호 중심", "애착 중심", "신체 활동 중심"
+            ],
+            "personality_traits_vector": [
+                "외향적", "내향적", "감성형", "이성형", "융통형", "원칙형",
+                "꼼꼼형", "자유형", "유머형", "침착형"
+            ],
+            "communication_style_vector": [
+                "설명 중심", "직관 중심", "대화형", "비언어형", "지시형"
+            ],
+            "caregiving_attitude_vector": [
+                "인내심 있는", "적극적인", "신뢰 중심", "개입형", "관찰형", "독립 유도형"
+            ],
+            "handling_situations_vector": [
+                "갈등 중재형", "돌발 상황 대응형", "계획형", "유연 대응형"
+            ],
+            "empathy_traits_vector": [
+                "감정 민감형", "공감 우선형", "무던한 형", "감정 표현형"
+            ],
+            "trust_time_vector": [
+                "시간 엄수형", "융통성 있는", "신뢰 우선형"
+            ]
+        }
+
+        # GPT 입력 프롬프트 구성
         prompt = (
-            "다음은 아이 돌보미 지원자와의 대화 내용입니다. 이 대화를 바탕으로 해당 사람의 성향을 분석해 주세요.\n"
-            "분석 기준은 다음과 같습니다:\n"
-            "- 성실성(diligent)\n"
-            "- 활발함(sociable)\n"
-            "- 유쾌함(cheerful)\n"
-            "- 따뜻함(warm)\n"
-            "- 긍정적임(positive)\n"
-            "- 관찰력(observant)\n\n"
-            "평균은 0.5 기준이며, 강하게 드러나는 성향은 0.8 이상, 근거가 모호한 항목은 0.4 이하로 평가하세요.\n"
-            "모호한 항목은 판단을 보류하지 말고 0.3~0.4 수준의 낮은 점수를 부여하세요.\n"
-            "설명 없이 반드시 JSON 형식만 출력하세요. 예: {\"diligent\": 0.7, ...}\n\n"
-            "[대화 내용]\n"
+            "당신은 '돌보미 성향 자가진단 챗봇'입니다.\n"
+            "사용자는 돌보미로서 본인의 돌봄 성향과 가치관을 이해하고자 자가진단을 수행하고 있습니다.\n\n"
+            "이 대화는 실제 돌봄 현장에서 발생할 수 있는 상황을 가정한 15개의 역할극 질문에 대한 응답이며,\n"
+            "지원자의 말투, 행동, 사고방식, 감정 표현 등을 기반으로 아래 7개 항목에 대해 0~1 사이의 수치로 성향을 정량적으로 분석해주세요:\n"
+            "1) parenting_style_vector\n"
+            "2) personality_traits_vector\n"
+            "3) communication_style_vector\n"
+            "4) caregiving_attitude_vector\n"
+            "5) handling_situations_vector\n"
+            "6) empathy_traits_vector\n"
+            "7) trust_time_vector\n\n"
+            "❗️이 분석은 어디까지나 자가진단을 위한 도구입니다.\n"
+            "❗️'추천', '매칭', '평가', '권장', '연결', '도움이 된다' 등의 문맥은 절대 사용하지 마세요.\n"
+            "❗️분석의 목적은 오직 지원자가 스스로를 더 잘 이해하도록 돕는 데 있습니다.\n"
+            "⚠️ 반드시 아래 형식을 정확히 지켜 JSON으로 출력해주세요.\n"
+            "⚠️ 각 항목의 길이는 고정이며, 수치는 0.0 ~ 1.0 사이여야 합니다.\n"
+            "⚠️ 각 항목에 대해 판단 가능한 경우에만 'judged'를 true로 표시하고, 부족한 경우 false로 표시하세요.\n\n"
+            "예시:\n"
+            "{\n"
+            "  \"vectors\": {\n"
+            "    \"parenting_style_vector\": [0.1, 0.2, 0.0, 0.3, 0.0, 0.0, 0.0, 0.0],\n"
+            "    ...\n"
+            "  },\n"
+            "  \"judged\": {\n"
+            "    \"parenting_style_vector\": true,\n"
+            "    ...\n"
+            "  }\n"
+            "}\n\n"
+            "🧠 아래는 돌보미 지원자의 자가진단 대화입니다:\n"
             + "\n".join(data.history)
         )
 
-        # 2. GPT 호출
+        # GPT 호출
         gpt_response = client.chat.completions.create(
             model=chat_model,
             messages=[
-                {"role": "system", "content": "당신은 객관적이고 냉정한 성향 분석 전문가입니다. JSON만 출력하세요."},
-                {"role": "user", "content": prompt}
+                {
+                    "role": "system",
+                    "content": (
+                        "당신은 돌보미 성향을 정량적으로 분석하는 자가진단 시스템입니다.\n"
+                        "지원자는 돌보미로서 본인의 성향을 파악하고 이해하기 위해 역할극 기반 대화에 참여했습니다.\n\n"
+                        "당신의 유일한 목적은 이 대화의 내용을 기반으로 7가지 항목에 대한 수치를 0~1 범위로 분석하고,\n"
+                        "판단 가능한 항목만 'judged': true로 명시하는 것입니다.\n\n"
+                        "절대 다음 표현을 사용하지 마세요: '추천', '매칭', '연결', '도움', '적절한 돌보미', '좋은 성향', '이런 유형에 맞는 아이' 등.\n"
+                        "이 분석은 외부 목적이 아닌 오직 사용자의 자기 이해를 위한 자가진단입니다.\n"
+                        "감정적인 반응 없이 분석가로서 일관되게, 정확하게 판단하세요."
+                    )
+                },
+                {
+                    "role": "user",
+                    "content": prompt
+                }
             ],
             temperature=0.3
         )
 
-        # 3. 응답 파싱
+        # JSON 응답 추출 및 정제
         raw = gpt_response.choices[0].message.content.strip()
-        print("[GPT 응답 원문]", repr(raw))  # 디버깅용 로그
-
-        # JSON만 추출
         match = re.search(r"\{[\s\S]*?\}", raw)
         if not match:
             raise HTTPException(status_code=500, detail="GPT 응답에서 JSON을 찾을 수 없습니다.")
 
-        json_str = match.group()
-        traits = json.loads(json_str)
+        parsed = json.loads(match.group())
+        vectors = parsed.get("vectors", {})
+        judged = parsed.get("judged", {})
 
-        # 필수 키 누락 시 기본값(0.3)으로 채우기
-        required_keys = {"diligent", "sociable", "cheerful", "warm", "positive", "observant"}
-        for key in required_keys:
-            traits[key] = traits.get(key, 0.3)
+        # 길이 보정 로직 적용
+        result = {}
+        for key, items in categories.items():
+            expected_len = len(items)
+            vec = vectors.get(key, [])
 
-        return {"traits": traits}
+            if not isinstance(vec, list):
+                vec = [0.0] * expected_len
+            elif len(vec) < expected_len:
+                vec += [0.0] * (expected_len - len(vec))
+            elif len(vec) > expected_len:
+                vec = vec[:expected_len]
+
+            result[key] = vec
+
+        return {
+            "vectors": result,
+            "judged": judged
+        }
 
     except json.JSONDecodeError as e:
         raise HTTPException(status_code=500, detail=f"JSON 파싱 실패: {e}")
@@ -494,32 +573,34 @@ def analyze_personality_from_chat(data: ChatHistoryRequest):
 
 
 
-# ✅ 돌보미 성향 DB 저장
-class TraitUpdateRequest(BaseModel):
-    email: str
-    diligent: float
-    sociable: float
-    cheerful: float
-    warm: float
-    positive: float
-    observant: float
+# ────────────────────────────────────────────────
+# 🚩 DB 저장 API
+# ────────────────────────────────────────────────
 
-@app.post("/caregiver/update-traits")
-def update_traits(data: TraitUpdateRequest, db: Session = Depends(get_db)):
+@app.post("/caregiver/update-vectors")
+def update_caregiver_vectors(data: VectorUpdateRequest, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == data.email).first()
     if not user:
-        raise HTTPException(status_code=404, detail="해당 이메일의 사용자를 찾을 수 없습니다.")
+        raise HTTPException(status_code=404, detail="해당 이메일의 사용자가 존재하지 않습니다.")
 
     caregiver = db.query(Caregiver).filter(Caregiver.user_id == user.id).first()
     if not caregiver:
-        raise HTTPException(status_code=404, detail="돌보미 정보가 없습니다.")
+        raise HTTPException(status_code=404, detail="해당 사용자는 돌보미가 아닙니다.")
 
-    caregiver.diligent = data.diligent
-    caregiver.sociable = data.sociable
-    caregiver.cheerful = data.cheerful
-    caregiver.warm = data.warm
-    caregiver.positive = data.positive
-    caregiver.observant = data.observant
+    vector_fields = [
+        "parenting_style_vector",
+        "personality_traits_vector",
+        "communication_style_vector",
+        "caregiving_attitude_vector",
+        "handling_situations_vector",
+        "empathy_traits_vector",
+        "trust_time_vector"
+    ]
+
+    for field in vector_fields:
+        value = getattr(data, field)
+        if value is not None:
+            setattr(caregiver, field, json.dumps(value))
 
     db.commit()
-    return {"message": "성향 점수가 성공적으로 저장되었습니다."}
+    return {"message": "돌보미 성향 벡터가 성공적으로 업데이트되었습니다."}

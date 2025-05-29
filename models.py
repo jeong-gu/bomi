@@ -37,14 +37,6 @@ class Caregiver(Base):
     user_id = Column(Integer, ForeignKey("users.id"), unique=True)
     age = Column(Integer)
 
-    # 기본 성향 feature (기존)
-    diligent = Column(Float, default=0.0)
-    sociable = Column(Float, default=0.0)
-    cheerful = Column(Float, default=0.0)
-    warm = Column(Float, default=0.0)
-    positive = Column(Float, default=0.0)
-    observant = Column(Float, default=0.0)
-
     # GPT 임베딩 등 추가 정보
     embedding = Column(LargeBinary, nullable=True)
 
@@ -55,44 +47,18 @@ class Caregiver(Base):
     age_min = Column(Float, nullable=True)
     age_max = Column(Float, nullable=True)
 
-    # ✅ 추가된 벡터 기반 성향 정보 (JSON 문자열 형태)
-    parenting_style_vector        = Column(Text, nullable=True)  # JSON: [0.1, 0.2, ...]
-    personality_traits_vector     = Column(Text, nullable=True)
-    communication_style_vector    = Column(Text, nullable=True)
-    caregiving_attitude_vector   = Column(Text, nullable=True)
-    handling_situations_vector    = Column(Text, nullable=True)
-    empathy_traits_vector         = Column(Text, nullable=True)
-    trust_time_vector             = Column(Text, nullable=True)
-#     categories = {
-#     "parenting_style": [
-#         "교육 중심", "정서 케어 중심", "자율성 중심", "훈육 중심",
-#         "놀이 중심", "안전/보호 중심", "애착 중심", "신체 활동 중심"
-#     ],
-#     "personality_traits": [
-#         "외향적", "내향적", "감성형", "이성형", "융통형", "원칙형",
-#         "꼼꼼형", "자유형", "유머형", "침착형"
-#     ],
-#     "communication_style": [
-#         "설명 중심", "직관 중심", "대화형", "비언어형", "지시형"
-#     ],
-#     "caregiving_attitude": [
-#         "인내심 있는", "적극적인", "신뢰 중심", "개입형", "관찰형", "독립 유도형"
-#     ],
-#     "handling_situations": [
-#         "갈등 중재형", "돌발 상황 대응형", "계획형", "유연 대응형"
-#     ],
-#     "empathy_traits": [
-#         "감정 민감형", "공감 우선형", "무던한 형", "감정 표현형"
-#     ],
-#     "trust_time": [
-#         "시간 엄수형", "융통성 있는", "신뢰 우선형"
-#     ]
-# }
-
-
+    # 벡터 기반 성향 정보 (JSON 문자열 형태)
+    parenting_style_vector      = Column(Text, nullable=True)  # JSON: [0.1, 0.2, ...]
+    personality_traits_vector   = Column(Text, nullable=True)
+    communication_style_vector  = Column(Text, nullable=True)
+    caregiving_attitude_vector  = Column(Text, nullable=True)
+    handling_situations_vector  = Column(Text, nullable=True)
+    empathy_traits_vector       = Column(Text, nullable=True)
+    trust_time_vector           = Column(Text, nullable=True)
 
     # 관계
     user = relationship("User", back_populates="caregiver")
+    reviews = relationship("Review", back_populates="caregiver", cascade="all, delete")
 
 
     
@@ -128,3 +94,17 @@ class UserPreference(Base):
     embedding = Column(LargeBinary)    # 고객의 스타일에 대한 벡터 표현 (GPT 임베딩 기반)
 
     user = relationship("User", back_populates="preferences")
+
+class Review(Base):
+    __tablename__ = "reviews"
+
+    id = Column(Integer, primary_key=True)
+    caregiver_id = Column(Integer, ForeignKey("caregivers.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)  # 작성자 (부모)
+    rating = Column(Float, nullable=True)  # 별점 (선택적)
+    text = Column(Text, nullable=False)    # 후기 내용
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # 관계
+    caregiver = relationship("Caregiver", back_populates="reviews")
+    user = relationship("User")  # 역관계는 선택사항
