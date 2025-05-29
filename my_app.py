@@ -1038,121 +1038,81 @@ def page_recommend_result():
 
 ########################################
 def page_chat_talk():
-    # ✅ 상태 변수 설정
-    if "chat_messages" not in st.session_state:
+    import requests
+
+    # 1) 챗봇 초기 메시지 자동 삽입 (처음 입장 시)
+    if "chat_messages" not in st.session_state or len(st.session_state.chat_messages) == 0:
         st.session_state.chat_messages = [{
             "role": "assistant",
             "content": (
-                "안녕하세요 😊\n 무엇이든 물어보세요!!"
+                "안녕하세요! 궁금한 점이나 도움이 필요하신 내용을 편하게 말씀해 주세요. "
+                "육아, 돌봄 서비스, 관련 정책 등 다양한 정보를 안내해 드릴게요."
             )
-        }]  # 수다 대화 상태 변수 추가
-        
+        }]
+
+    # 2) 상태 변수 초기화
     if "last_chat_input" not in st.session_state:
-        st.session_state.last_chat_input = None  
+        st.session_state.last_chat_input = None
     if "waiting_for_chat_response" not in st.session_state:
         st.session_state.waiting_for_chat_response = False
 
-    # ✅ **CSS 스타일 수정 (입력창을 채팅창 내부에 완전히 포함)**
+    # 3) CSS 스타일 (기존과 동일)
     st.markdown("""
     <style>
+    .stButton > button {
+        padding: 0.25rem 0.75rem !important;
+        font-size: 0.9rem !important;
+    }
     .chat-container {
-      width: 90%;
-      max-width: 600px;
-      height: 75vh;
-      display: flex;
-      flex-direction: column-reverse;
-      overflow-y: auto;
-      padding: 15px;
-      background: white;
-      margin: auto;
-      border-radius: 15px;
-      box-shadow: 0px 4px 10px rgba(0, 0, 0, 0.1);
-      position: relative;
+        width: 90%;
+        max-width: 600px;
+        height: 70vh;
+        display: flex;
+        flex-direction: column;
+        overflow-y: auto;
+        padding: 15px;
+        background: white;
+        margin: auto;
+        border-radius: 15px;
+        box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+        position: relative;
     }
-
-    .chat-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      width: 100%;
-      background: #ffcc66;
-      color: white;
-      padding: 12px 16px;
-      font-size: 18px;
-      font-weight: bold;
-      border-bottom: 2px solid #ffb347;
-      border-radius: 8px 8px 0 0;
-    }
-
-    .chat-header h3 {
-      flex-grow: 1;
-      text-align: center;
-      margin: 0;
-    }
-
     .user-bubble {
-      background: #d0f0ff;
-      padding: 12px;
-      border-radius: 20px;
-      margin: 5px 0;
-      max-width: 70%;
-      margin-left: auto;
-      text-align: left;
-      box-shadow: 2px 2px 6px rgba(0, 0, 0, 0.1);
+        background: #d0f0ff;
+        padding: 12px;
+        border-radius: 20px;
+        margin: 5px 0;
+        max-width: 70%;
+        margin-left: auto;
+        text-align: left;
+        box-shadow: 2px 2px 6px rgba(0,0,0,0.1);
     }
-
     .assistant-bubble {
-      background: #ffeb99;
-      padding: 12px;
-      border-radius: 20px;
-      margin: 5px 0;
-      max-width: 70%;
-      margin-right: auto;
-      text-align: left;
-      box-shadow: 2px 2px 6px rgba(0, 0, 0, 0.1);
+        background: #ffeb99;
+        padding: 12px;
+        border-radius: 20px;
+        margin: 5px 0;
+        max-width: 70%;
+        margin-right: auto;
+        text-align: left;
+        box-shadow: 2px 2px 6px rgba(0,0,0,0.1);
     }
-
     .loading-bubble {
-      background: #fff2c7;
-      padding: 12px;
-      border-radius: 20px;
-      margin: 5px 0;
-      max-width: 70%;
-      margin-right: auto;
-      text-align: left;
-      box-shadow: 2px 2px 6px rgba(0, 0, 0, 0.1);
-      font-weight: bold;
+        background: #fff2c7;
+        padding: 12px;
+        border-radius: 20px;
+        margin: 5px 0;
+        max-width: 70%;
+        margin-left: 0; /* 왼쪽 정렬 */
+        text-align: left;
+        font-weight: bold;
+        box-shadow: 2px 2px 6px rgba(0,0,0,0.1);
     }
-
-    /* ✅ 입력창을 채팅창 내부 최하단에 고정 */
-    .input-container {
-      width: calc(100% - 30px);
-      padding: 10px;
-      background: white;
-      border-top: 2px solid #ccc;
-      display: flex;
-      align-items: center;
-      position: absolute;
-      bottom: 0;
-      left: 15px;
-      border-radius: 0 0 15px 15px;
-      box-shadow: 0px -2px 8px rgba(0, 0, 0, 0.1);
-    }
-
-    .input-container input {
-      width: 100%;
-      padding: 10px;
-      border: none;
-      outline: none;
-      font-size: 16px;
-      border-radius: 10px;
-      background: #f1f3f4;
-    }
-    
     </style>
     """, unsafe_allow_html=True)
+    
 
-    # ✅ **상단 타이틀 바**
+    # 4) 상단 타이틀 및 네비게이션 버튼
     col1, col2, col3 = st.columns([1, 5, 1])
     with col1:
         if st.button("◀", key="back_chat_btn"):
@@ -1160,22 +1120,19 @@ def page_chat_talk():
             st.rerun()
 
     with col2:
-        st.markdown(f"<h3 style='text-align: center;'> 정보의 바다!</h3>", unsafe_allow_html=True)
+        st.markdown("<h3 style='text-align: center;'> 정보 안내 챗봇</h3>", unsafe_allow_html=True)
 
     with col3:
         if st.button("🏠", key="home_chat_btn"):
             st.session_state.page = "home"
             st.rerun()
 
-    # ✅ **채팅 메시지 컨테이너 (입력창 포함)**
+    # 5) 채팅 메시지 렌더링 (역순으로 표시)
     messages_html = '<div class="chat-container" id="chat-messages">'
-
-    # ✅ "🐝 답변 생성 중..."을 조건부로 표시
     if st.session_state.waiting_for_chat_response:
-        messages_html += '<div class="loading-bubble">🐝 답변 생성 중...</div>'
+        messages_html += '<div class="loading-bubble">답변 생성 중...</div>'
 
-    # ✅ 기존 메시지 렌더링
-    for msg in reversed(st.session_state.chat_messages):
+    for msg in st.session_state.chat_messages:
         if msg["role"] == "user":
             messages_html += f'<div class="user-bubble"><strong>Q:</strong> {msg["content"]}</div>'
         else:
@@ -1184,39 +1141,40 @@ def page_chat_talk():
     messages_html += '</div>'
     st.markdown(messages_html, unsafe_allow_html=True)
 
-    # ✅ **입력창을 채팅창 내부 최하단에 고정 (단일 입력창 유지)**
-    user_q = st.text_input(
-        "자유롭게 수다를 떨어보세요!", 
-        key="chat_input", 
-        label_visibility="collapsed"
+    # 6) 입력창 및 입력 처리 함수
+    def _on_chat_enter():
+        ui = st.session_state.chat_input
+        if not ui or ui == st.session_state.last_chat_input:
+            return
+        st.session_state.chat_messages.append({"role": "user", "content": ui})
+        st.session_state.last_chat_input = ui
+        st.session_state.waiting_for_chat_response = True
+        st.session_state.chat_input = ""  # 입력창 비우기
+
+    st.text_input(
+        "궁금한 내용을 입력해 주세요.",
+        key="chat_input",
+        label_visibility="collapsed",
+        on_change=_on_chat_enter
     )
 
-    # ✅ **질문 입력 처리**
-    if user_q and user_q != st.session_state.last_chat_input:
-        st.session_state.chat_messages.append({"role": "user", "content": user_q})
-        st.session_state.waiting_for_chat_response = True
-        st.session_state.last_chat_input = user_q
-        st.rerun()
-
-    # ✅ **AI 응답 생성 (자동 호출)**
+    # 7) AI 응답 생성 처리
     if st.session_state.waiting_for_chat_response:
-        with st.spinner("🐝 답변 생성 중..."):
+        with st.spinner("답변 생성 중..."):
             try:
                 resp = requests.post(
                     RAG_API_URL,
-                    json={"prompt": st.session_state.chat_messages[-1]["content"], "category": "general_chat"}
+                    json={"prompt": st.session_state.chat_messages[-1]["content"], "category": "info_chat"}
                 )
                 resp.raise_for_status()
                 data = resp.json()
-                answer = data.get("answer", "🚨 응답 없음.")
+                answer = data.get("answer", "죄송합니다, 답변을 드리기 어려워요.")
             except requests.exceptions.RequestException as e:
                 answer = f"오류 발생: {str(e)}"
 
-        # ✅ "답변 생성 중..." 제거 후 실제 응답 추가
         st.session_state.chat_messages.append({"role": "assistant", "content": answer})
         st.session_state.waiting_for_chat_response = False
         st.rerun()
-
 ########################################
 
 
