@@ -446,8 +446,9 @@ class VectorUpdateRequest(BaseModel):
 # 🚩 성향 추출 API
 # ────────────────────────────────────────────────
  
+import traceback
 
-@app.post("/caregiver/personality/from-chat", response_model=VectorResponse)
+@app.post("/caregiver/personality/from-chat")
 def analyze_personality_from_chat(data: ChatHistoryRequest, db: Session = Depends(get_db)):
     try:
         # 성향 카테고리 정의
@@ -477,37 +478,43 @@ def analyze_personality_from_chat(data: ChatHistoryRequest, db: Session = Depend
             ]
         }
 
-        # GPT 입력 프롬프트 구성
+        # 프롬프트 생성
         prompt = (
             "당신은 '돌보미 성향 자가진단 챗봇'입니다.\n"
-            "사용자는 돌보미로서 본인의 돌봄 성향과 가치관을 이해하고자 자가진단을 수행하고 있습니다.\n\n"
-            "이 대화는 실제 돌봄 현장에서 발생할 수 있는 상황을 가정한 15개의 역할극 질문에 대한 응답이며,\n"
-            "지원자의 말투, 행동, 사고방식, 감정 표현 등을 기반으로 아래 7개 항목에 대해 0~1 사이의 수치로 성향을 정량적으로 분석해주세요:\n"
-            "1) parenting_style_vector\n"
-            "2) personality_traits_vector\n"
-            "3) communication_style_vector\n"
-            "4) caregiving_attitude_vector\n"
-            "5) handling_situations_vector\n"
-            "6) empathy_traits_vector\n"
-            "7) trust_time_vector\n\n"
-            "❗️이 분석은 어디까지나 자가진단을 위한 도구입니다.\n"
-            "❗️'추천', '매칭', '평가', '권장', '연결', '도움이 된다' 등의 문맥은 절대 사용하지 마세요.\n"
-            "❗️분석의 목적은 오직 지원자가 스스로를 더 잘 이해하도록 돕는 데 있습니다.\n"
-            "⚠️ 반드시 아래 형식을 정확히 지켜 JSON으로 출력해주세요.\n"
-            "⚠️ 각 항목의 길이는 고정이며, 수치는 0.0 ~ 1.0 사이여야 합니다.\n"
-            "⚠️ 각 항목에 대해 판단 가능한 경우에만 'judged'를 true로 표시하고, 부족한 경우 false로 표시하세요.\n\n"
-            "예시:\n"
+            "지원자는 돌보미로서 본인의 돌봄 성향과 가치관을 이해하고자 자가진단을 수행하고 있습니다.\n\n"
+            "🧠 아래 대화는 실제 돌봄 상황을 가정한 역할극 질문과 지원자의 응답입니다.\n"
+            "이 대화를 바탕으로 다음 7개의 성향 항목에 대해 0~1 사이의 수치로 분석해주세요:\n"
+            "\n"
+            "1) parenting_style_vector (총 8개 항목)\n"
+            "2) personality_traits_vector (총 10개 항목)\n"
+            "3) communication_style_vector (총 5개 항목)\n"
+            "4) caregiving_attitude_vector (총 6개 항목)\n"
+            "5) handling_situations_vector (총 4개 항목)\n"
+            "6) empathy_traits_vector (총 4개 항목)\n"
+            "7) trust_time_vector (총 3개 항목)\n"
+            "\n"
+            "각 항목은 반드시 해당 개수만큼의 float 값이 들어간 리스트 형태로 출력해야 합니다.\n"
+            "값은 0.0 이상 1.0 이하의 수치이며, 지원자의 응답을 기반으로 성향을 정량적으로 분석해주세요.\n"
+            "\n"
+            "❗ 판단이 어려운 항목은 0.1로 설정하세요.\n"
+            "❗ 판단이 가능한 항목만 0.1이 아닌 수치를 넣어주세요.\n"
+            "❗ 항목별로 리스트 길이는 정확히 맞춰야 하며, 생략하거나 잘못된 길이로 출력하지 마세요.\n"
+            "\n"
+            "✅ 출력 형식은 반드시 아래와 같아야 합니다. 다른 텍스트는 포함하지 마세요.\n"
+            "\n"
             "{\n"
             "  \"vectors\": {\n"
-            "    \"parenting_style_vector\": [0.1, 0.2, 0.0, 0.3, 0.0, 0.0, 0.0, 0.0],\n"
-            "    ...\n"
-            "  },\n"
-            "  \"judged\": {\n"
-            "    \"parenting_style_vector\": true,\n"
-            "    ...\n"
+            "    \"parenting_style_vector\": [0.2, 0.1, 0.5, 0.1, 0.3, 0.1, 0.1, 0.6],\n"
+            "    \"personality_traits_vector\": [0.1, 0.8, 0.1, 0.1, 0.5, 0.6, 0.1, 0.3, 0.1, 0.1],\n"
+            "    \"communication_style_vector\": [0.7, 0.1, 0.1, 0.1, 0.1],\n"
+            "    \"caregiving_attitude_vector\": [0.6, 0.1, 0.8, 0.1, 0.1, 0.1],\n"
+            "    \"handling_situations_vector\": [0.1, 0.1, 0.5, 0.1],\n"
+            "    \"empathy_traits_vector\": [0.4, 0.1, 0.1, 0.7],\n"
+            "    \"trust_time_vector\": [0.3, 0.1, 0.1]\n"
             "  }\n"
-            "}\n\n"
-            "🧠 아래는 돌보미 지원자의 자가진단 대화입니다:\n"
+            "}\n"
+            "\n"
+            "🧾 분석은 아래 자가진단 대화를 기반으로 수행하세요:\n"
             + "\n".join(data.history)
         )
 
@@ -518,13 +525,8 @@ def analyze_personality_from_chat(data: ChatHistoryRequest, db: Session = Depend
                 {
                     "role": "system",
                     "content": (
-                        "당신은 돌보미 성향을 정량적으로 분석하는 자가진단 시스템입니다.\n"
-                        "지원자는 돌보미로서 본인의 성향을 파악하고 이해하기 위해 역할극 기반 대화에 참여했습니다.\n\n"
-                        "당신의 유일한 목적은 이 대화의 내용을 기반으로 7가지 항목에 대한 수치를 0~1 범위로 분석하고,\n"
-                        "판단 가능한 항목만 'judged': true로 명시하는 것입니다.\n\n"
-                        "절대 다음 표현을 사용하지 마세요: '추천', '매칭', '연결', '도움', '적절한 돌보미', '좋은 성향', '이런 유형에 맞는 아이' 등.\n"
-                        "이 분석은 외부 목적이 아닌 오직 사용자의 자기 이해를 위한 자가진단입니다.\n"
-                        "감정적인 반응 없이 분석가로서 일관되게, 정확하게 판단하세요."
+                        "당신은 돌보미 성향을 분석하는 정량화 시스템입니다.\n"
+                        "지원자는 15개의 역할극을 기반으로 자가진단을 수행했으며, 당신은 다음과 같은 항목을 정량적으로 판단하세요."
                     )
                 },
                 {
@@ -535,41 +537,32 @@ def analyze_personality_from_chat(data: ChatHistoryRequest, db: Session = Depend
             temperature=0.3
         )
 
-        # JSON 응답 추출 및 정제
+        # GPT 응답 추출
         raw = gpt_response.choices[0].message.content.strip()
-        match = re.search(r"\{[\s\S]*?\}", raw)
+        print("📨 GPT 응답 원문:\n", raw)
+
+        # (2) JSON 추출 시 괄호 매칭 보완
+        match = re.search(r"\{[\s\S]*\}", raw)
         if not match:
-            raise HTTPException(status_code=500, detail="GPT 응답에서 JSON을 찾을 수 없습니다.")
+            raise HTTPException(status_code=400, detail="GPT 응답에서 JSON 형식을 찾을 수 없습니다.")
 
-        parsed = json.loads(match.group())
-        vectors = parsed.get("vectors", {})
-        judged = parsed.get("judged", {})
+        json_str = match.group()
+        if not json_str.strip().endswith("}"):
+            json_str += "}"  # 혹시 누락됐을 경우 대비
 
-        # 길이 보정 로직 적용
-        result = {}
-        for key, items in categories.items():
-            expected_len = len(items)
-            vec = vectors.get(key, [])
+        print("📤 추출된 JSON 문자열:\n", json_str)
 
-            if not isinstance(vec, list):
-                vec = [0.0] * expected_len
-            elif len(vec) < expected_len:
-                vec += [0.0] * (expected_len - len(vec))
-            elif len(vec) > expected_len:
-                vec = vec[:expected_len]
+        # (3) JSON 파싱
+        parsed = json.loads(json_str)
 
-            result[key] = vec
-
-        return {
-            "vectors": result,
-            "judged": judged
-        }
+        return JSONResponse(content=parsed)
 
     except json.JSONDecodeError as e:
+        print(traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"JSON 파싱 실패: {e}")
     except Exception as e:
+        print(traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"예외 발생: {e}")
-
 
 
 

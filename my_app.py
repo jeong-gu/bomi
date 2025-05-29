@@ -176,8 +176,8 @@ def page_caregiver_personality():
                             json={"email": st.session_state.user_email, "history": history}
                         )
                         res1.raise_for_status()
+                        # GPT 분석 결과 받기
                         vectors = res1.json().get("vectors", {})
-                        judged = res1.json().get("judged", {})
 
                         categories = [
                             "parenting_style_vector",
@@ -199,26 +199,23 @@ def page_caregiver_personality():
                             "trust_time_vector": 3
                         }
 
+                        # 누락된 항목은 0.0으로 채움
                         for cat in categories:
                             if cat not in vectors:
                                 vectors[cat] = [0.0] * category_to_length[cat]
-                            if cat not in judged:
-                                judged[cat] = False
 
+                        # 서버에 업데이트 요청
                         res2 = requests.post(
                             "http://localhost:8005/caregiver/update-vectors",
                             json={"email": st.session_state.user_email, **vectors}
                         )
                         res2.raise_for_status()
 
-                        # 판단되지 않은 항목 안내
-                        uncertain = [cat for cat in categories if not judged.get(cat, True)]
-                        if uncertain:
-                            st.warning(f"아직 충분히 파악되지 않은 성향 항목이 있어요: {', '.join(uncertain)}\n좀 더 다양한 성향을 표현해 주세요!")
-                        else:
-                            st.success("성향 벡터가 성공적으로 저장되었어요! 🎉\n홈 화면으로 이동합니다.")
-                            st.session_state.page = "start"
-                            st.rerun()
+                        # 성공 메시지 출력
+                        st.success("성향 벡터가 성공적으로 저장되었어요! 🎉\n홈 화면으로 이동합니다.")
+                        st.session_state.page = "start"
+                        st.rerun()
+
 
                     except requests.exceptions.RequestException as e:
                         st.error(f"서버 요청 중 오류 발생: {e}")
