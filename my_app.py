@@ -567,7 +567,7 @@ def page_caregiver_home():
     if row2[1].button("돌보미목록"):
         st.session_state.page = "caregivers"; st.rerun()
     if row2[3].button("조건설정"):
-        st.session_state.page = "caregiver_settings"; st.rerun()
+        st.session_state.page = "caregiver_conditions"; st.rerun()
 
     st.markdown('</div>', unsafe_allow_html=True)
 
@@ -1410,122 +1410,168 @@ def page_caregiver_list():
 
     except Exception as e:
         st.error(f"❌ 오류 발생: {e}")
-def page_caregiver_settings():
-    # ────────────────────────────────────────────────
-    # 1) 내비게이션 바 (뒤로 / 제목 / 홈)
-    # ────────────────────────────────────────────────
-    col1, col2, col3 = st.columns([1, 5, 1])
+        
+# def page_caregiver_settings():
+#     # ────────────────────────────────────────────────
+#     # 1) 내비게이션 바 (뒤로 / 제목 / 홈)
+#     # ────────────────────────────────────────────────
+#     col1, col2, col3 = st.columns([1, 5, 1])
+#     with col1:
+#         if st.button("◀", key="back_to_home_from_settings"):
+#             st.session_state.page = "home"
+#             st.rerun()
+#     with col2:
+#         st.markdown("<h3 style='text-align: center;'>⚙️ 조건 설정</h3>", unsafe_allow_html=True)
+#     with col3:
+#         if st.button("🏠", key="home_from_settings"):
+#             st.session_state.page = "home"
+#             st.rerun()
+
+#     # ────────────────────────────────────────────────
+#     # 2) 페이지 전용 CSS (컨테이너 꽉 채우기 + 폼 간격)
+#     # ────────────────────────────────────────────────
+#     st.markdown("""
+#     <style>
+#       .block-container {
+#         min-height: 100vh !important;
+#         display: flex;
+#         flex-direction: column;
+#         padding-top: 2rem;
+#       }
+#       /* 폼 요소 간격 */
+#       .stForm > div {
+#         margin-bottom: 1.5rem !important;
+#       }
+#       /* 제출 버튼 가로 너비 */
+#       .stForm button[type="submit"] > button {
+#         width: 100% !important;
+#         padding: 0.75rem 0 !important;
+#         font-size: 1rem !important;
+#       }
+#     </style>
+#     """, unsafe_allow_html=True)
+
+#     # ────────────────────────────────────────────────
+#     # 3) 조건 입력 폼
+#     # ────────────────────────────────────────────────
+#     with st.form("caregiver_settings_form"):
+#         # (1) 돌봄 가능 연령 필터
+#         age_options = ["0~2세", "3~5세", "6세 이상", "전 연령"]
+#         st.multiselect(
+#             "돌봄 가능 연령 선택",
+#             options=age_options,
+#             default=st.session_state.get("filter_age", ["전 연령"]),
+#             key="filter_age"
+#         )
+
+#         # (2) 활동 가능 요일 필터
+#         day_options = ["월", "화", "수", "목", "금", "토", "일"]
+#         st.multiselect(
+#             "활동 가능 요일 선택",
+#             options=day_options,
+#             default=st.session_state.get("filter_days", day_options),
+#             key="filter_days"
+#         )
+
+#         # (3) 최대 1시간당 요금 필터 (단위는 레이블에 넣기)
+#         st.number_input(
+#             "최대 1시간당 요금 (원)",
+#             min_value=0,
+#             step=1000,
+#             value=st.session_state.get("filter_max_rate", 0),
+#             key="filter_max_rate",
+#             format="%d"  # 숫자만 포맷
+#         )
+
+#         # (4) 저장 버튼 — 반드시 폼 안에 있어야 합니다!
+#         submitted = st.form_submit_button("저장")
+
+#     # ────────────────────────────────────────────────
+#     # 4) 저장 후 처리
+#     # ────────────────────────────────────────────────
+#     if submitted:
+#         st.success("✅ 조건이 저장되었습니다.")
+#         # 저장된 조건을 다음 조회에 사용하도록 바로 돌보미 목록으로 이동
+#         st.session_state.page = "home"
+#         st.rerun()
+        
+# ───────────────────────────────────────────────
+# 돌보미 조건 설정 페이지
+# ───────────────────────────────────────────────
+def page_caregiver_conditions():
+    st.subheader("🗓️ 돌보미 조건 설정")
+    st.markdown("돌봄이 가능한 요일, 시간, 조건을 선택해주세요.")
+
+    if "user_email" not in st.session_state:
+        st.error("먼저 로그인해주세요.")
+        return
+
+    # ───── 요일 선택 ─────
+    days = ["월", "화", "수", "목", "금", "토", "일"]
+    selected_days = []
+    select_all = st.checkbox("모든 요일 선택")
+    cols = st.columns(7)
+    for i, day in enumerate(days):
+        if cols[i].checkbox(day, value=select_all, key=f"day_{day}"):
+            selected_days.append(day)
+
+    # ───── 시간대 추가 ─────
+    st.markdown("<h4 style='color: #2c3e50;'>시간대 설정</h4>", unsafe_allow_html=True)
+    if "edit_time_slots" not in st.session_state:
+        st.session_state.edit_time_slots = []
+
+    if st.button("⏰ 시간대 추가"):
+        st.session_state.edit_time_slots.append({"start": 1, "end": 1})
+
+    for i, slot in enumerate(st.session_state.edit_time_slots):
+        col1, col2, col3 = st.columns([2, 2, 1])
+        with col1:
+            slot["start"] = st.selectbox("시작 시간", range(1, 25), index=slot["start"]-1, key=f"start_{i}")
+        with col2:
+            slot["end"] = st.selectbox("종료 시간", range(1, 25), index=slot["end"]-1, key=f"end_{i}")
+        with col3:
+            if st.button("🗑️", key=f"delete_{i}"):
+                st.session_state.edit_time_slots.pop(i)
+                st.rerun()
+
+    # ───── 특수아동 여부 ─────
+    st.markdown("<h4 style='color: #2c3e50;'>특수아동 수용 여부</h4>", unsafe_allow_html=True)
+    special_child = st.radio("", ["O", "X"], horizontal=True)
+
+    # ───── 연령대 설정 ─────
+    st.markdown("<h4 style='color: #2c3e50;'>수용 가능 연령대</h4>", unsafe_allow_html=True)
+    age_range = st.slider("연령 범위 (단위: 세)", 0.25, 12.0, (1.0, 10.0), step=0.25, format="%.2f")
+    col1, col2 = st.columns([5, 1])
     with col1:
-        if st.button("◀", key="back_to_home_from_settings"):
-            st.session_state.page = "home"
+        if st.button("돌아가기"):
+            st.session_state.page = "start"  # 홈 화면을 표시하도록 페이지 상태 변경
             st.rerun()
+
     with col2:
-        st.markdown("<h3 style='text-align: center;'>⚙️ 조건 설정</h3>", unsafe_allow_html=True)
-    with col3:
-        if st.button("🏠", key="home_from_settings"):
-            st.session_state.page = "home"
-            st.rerun()
+        # ───── 저장 버튼 ─────
+        if st.button("저장"):
+            if not selected_days:
+                st.warning("하나 이상의 요일을 선택해주세요.")
+                st.stop()
+            if not st.session_state.edit_time_slots:
+                st.warning("하나 이상의 시간대를 추가해주세요.")
+                st.stop()
 
-    # ────────────────────────────────────────────────
-    # 2) 페이지 전용 CSS (컨테이너 꽉 채우기 + 폼 간격)
-    # ────────────────────────────────────────────────
-    st.markdown("""
-    <style>
-      .block-container {
-        min-height: 100vh !important;
-        display: flex;
-        flex-direction: column;
-        padding-top: 2rem;
-      }
-      /* 폼 요소 간격 */
-      .stForm > div {
-        margin-bottom: 1.5rem !important;
-      }
-      /* 제출 버튼 가로 너비 */
-      .stForm button[type="submit"] > button {
-        width: 100% !important;
-        padding: 0.75rem 0 !important;
-        font-size: 1rem !important;
-      }
-    </style>
-    """, unsafe_allow_html=True)
+            update_payload = {
+                "email": st.session_state.user_email,
+                "available_days": selected_days,
+                "available_times": st.session_state.edit_time_slots,
+                "special_child": special_child == "O",
+                "age_min": age_range[0],
+                "age_max": age_range[1]
+            }
+            try:
+                res = requests.post("http://localhost:8005/caregiver/update-conditions", json=update_payload)
+                res.raise_for_status()
+                st.success("조건이 성공적으로 저장되었습니다.")
+            except requests.exceptions.RequestException as e:
+                st.error(f"저장 실패: {e}")
 
-    # ────────────────────────────────────────────────
-    # 3) 조건 입력 폼
-    # ────────────────────────────────────────────────
-    with st.form("caregiver_settings_form"):
-        # (1) 돌봄 가능 연령 필터
-        age_options = ["0~2세", "3~5세", "6세 이상", "전 연령"]
-        st.multiselect(
-            "돌봄 가능 연령 선택",
-            options=age_options,
-            default=st.session_state.get("filter_age", ["전 연령"]),
-            key="filter_age"
-        )
-
-        # (2) 활동 가능 요일 필터
-        day_options = ["월", "화", "수", "목", "금", "토", "일"]
-        st.multiselect(
-            "활동 가능 요일 선택",
-            options=day_options,
-            default=st.session_state.get("filter_days", day_options),
-            key="filter_days"
-        )
-
-        # (3) 최대 1시간당 요금 필터 (단위는 레이블에 넣기)
-        st.number_input(
-            "최대 1시간당 요금 (원)",
-            min_value=0,
-            step=1000,
-            value=st.session_state.get("filter_max_rate", 0),
-            key="filter_max_rate",
-            format="%d"  # 숫자만 포맷
-        )
-
-        # (4) 저장 버튼 — 반드시 폼 안에 있어야 합니다!
-        submitted = st.form_submit_button("저장")
-
-    # ────────────────────────────────────────────────
-    # 4) 저장 후 처리
-    # ────────────────────────────────────────────────
-    if submitted:
-        st.success("✅ 조건이 저장되었습니다.")
-        # 저장된 조건을 다음 조회에 사용하도록 바로 돌보미 목록으로 이동
-        st.session_state.page = "home"
-        st.rerun()
-        
-########################################
-
-# 5) 라우팅 (맛집 챗봇 반영)
-# ########################################
-# if st.session_state.logged_in and st.session_state.page == "start":
-#     st.session_state.page = "home"
-#     st.rerun()
-    
-# page = st.session_state.page
-
-# if page == "start":
-#     page_start()
-    
-# elif page == "home":
-#     if st.session_state.user_role == "돌보미":
-#         page_caregiver_home()
-#     else:
-#         page_parent_home()
-        
-# elif page == "recommend":
-#     page_recommend_service()
-# elif page == "recommend_result":
-#     page_recommend_result()
-# elif page == "chat":
-#     page_chat_talk()
-# elif page == "pricing":
-#     page_pricing()
-# elif page == "fee_result":
-#     page_fee_result()
-# elif page == "caregivers":
-#     page_caregiver_list()
-# #######################################
 
 
 # 자동 로그인 후 시작 페이지에서 바로 home으로
@@ -1560,12 +1606,13 @@ elif page == "pricing":
 elif page == "fee_result":
     page_fee_result()
 
+elif page == "caregiver_conditions":
+    page_caregiver_conditions()
+
 elif page == "caregivers":
     page_caregiver_list()
+    
 elif page=="caregiver_personality":
     page_caregiver_personality()
-    
-elif page == "caregiver_settings":
-    page_caregiver_settings()
 
 # 더 만들 페이지가 생기면 여기 아래에 elif 로 추가

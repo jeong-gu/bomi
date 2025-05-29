@@ -657,3 +657,40 @@ def update_caregiver_vectors(data: VectorUpdateRequest, db: Session = Depends(ge
 
     db.commit()
     return {"message": "돌보미 성향 벡터가 성공적으로 업데이트되었습니다."}
+
+# 📦 Pydantic 스키마 정의
+class TimeSlot(BaseModel):
+    start: int
+    end: int
+
+class CaregiverConditionUpdate(BaseModel):
+    email: str
+    available_days: List[str]
+    available_times: List[TimeSlot]
+    special_child: bool
+    age_min: float
+    age_max: float
+
+@app.post("/caregiver/update-conditions")
+async def update_caregiver_conditions(data: CaregiverConditionUpdate, db: Session = Depends(get_db)):
+    # 1. 이메일로 유저 조회
+    print("📨 받은 JSON 데이터:\n", json.dumps(data.dict(), indent=2, ensure_ascii=False))
+    user = db.query(User).filter(User.email == data.email).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="해당 이메일의 사용자가 존재하지 않습니다.")
+
+    # 2. 유저가 돌보미인지 확인
+    caregiver = db.query(Caregiver).filter(Caregiver.user_id == user.id).first()
+    if not caregiver:
+        raise HTTPException(status_code=404, detail="해당 사용자는 돌보미가 아닙니다.")
+
+    # 3. 조건 업데이트
+    caregiver.available_days = json.dumps(data.available_days, ensure_ascii=False)
+    caregiver.available_times = json.dumps([slot.dict() for slot in data.available_times], ensure_ascii=False)
+    caregiver.special_child = data.special_child
+    caregiver.age_min = data.age_min
+    caregiver.age_max = data.age_max
+
+    db.commit()
+
+    return {"message": "돌보미 조건이 성공적으로 업데이트되었습니다."}
