@@ -28,7 +28,7 @@ caregiver_names = [
     "정예진", "하도현", "김지후", "송유리", "강서준"
 ]
 
-# 돌보미 15명 생성
+# 돌보미 30명 생성
 for i in range(30):
     username = caregiver_names[i]
     email = f"caregiver{i+1}@test.com"
@@ -37,24 +37,37 @@ for i in range(30):
     hashed_pw = hash_password("123")
     created_at = datetime.now().isoformat()
 
-    # 1. users 테이블에 삽입
+    # 요일: 무작위로 2~4개 선택
+    available_days = random.sample(["월", "화", "수", "목", "금", "토", "일"], k=random.randint(2, 4))
+
+    # 시간대: 무작위로 1~3개 슬롯 생성
+    available_times = []
+    for _ in range(random.randint(1, 3)):
+        start = random.randint(1, 22)
+        end = random.randint(start + 1, min(start + 4, 24))  # 최대 3시간 블럭
+        available_times.append({"start": start, "end": end})
+
+    # 나이 범위: 0.25 단위로 설정
+    age_min = round(random.uniform(0.25, 6.0), 2)
+    age_max = round(random.uniform(age_min, 12.0), 2)  # 최소값보다 크거나 같게
+
+    # 1. users 테이블 삽입
     cur.execute("""
         INSERT INTO users (username, email, hashed_password, role, phone, age, created_at)
         VALUES (?, ?, ?, 'care', ?, ?, ?)
     """, (username, email, hashed_pw, phone, age, created_at))
-    
-    user_id = cur.lastrowid  # 방금 추가된 user의 id
+    user_id = cur.lastrowid
 
-    # 2. caregivers 테이블에 삽입
+    # 2. caregivers 테이블 삽입
     caregiver_data = {
         "user_id": user_id,
         "age": age,
         "embedding": None,
-        "available_days": random.choice(["월화수", "화수목", "금토일"]),
-        "available_times": random.choice(["오전", "오후", "종일"]),
+        "available_days": json.dumps(available_days, ensure_ascii=False),
+        "available_times": json.dumps(available_times),
         "special_child": random.choice([0, 1]),
-        "age_min": random.choice([3, 4, 5]),
-        "age_max": random.choice([8, 10, 12]),
+        "age_min": age_min,
+        "age_max": age_max,
         "parenting_style_vector": json.dumps(random_vector(8)),
         "personality_traits_vector": json.dumps(random_vector(10)),
         "communication_style_vector": json.dumps(random_vector(5)),
@@ -80,5 +93,6 @@ for i in range(30):
         )
     """, caregiver_data)
 
+# 저장 후 종료
 conn.commit()
 conn.close()
