@@ -782,6 +782,8 @@ def page_pricing():
 ########################################
 #############################################
 
+
+
 def page_recommend_service():
     import requests
 
@@ -995,8 +997,8 @@ def page_recommend_result() -> None:
         if st.button("돌아가기"):
             st.session_state.page = "recommend"
         return
-
     result = st.session_state.recommendation_result
+    print(result)
 
     # ───────── 루프: Top-3 돌보미 ─────────
     for rank, rec in enumerate(result["recommendations"], start=1):
@@ -1361,7 +1363,11 @@ def page_caregiver_list():
 
 
     all_names = [r[1] for r in all_rows]
-    sel = st.selectbox("돌보미 선택", all_names, key="selected_name")
+    # 이름 필터용
+    filter_name = st.selectbox("🔍 돌보미 이름 필터", ["전체"] + all_names, key="filter_name")
+
+    # 매칭용 선택박스
+    sel = st.selectbox("💡 돌보미 매칭 선택", all_names, key="match_name")
 
     col1, col2, col3 = st.columns([2, 10, 2])
 
@@ -1383,28 +1389,25 @@ def page_caregiver_list():
                 st.session_state.show_review_input = True
                 st.rerun()
 
-
-
-
-
-
-
     if st.session_state.get("show_review_input"):
         def add_review():
             txt = st.session_state.review_input.strip()
             if not txt: return
-            with sqlite3.connect("users.db", isolation_level=None) as conn:
-                conn.execute("""
-                    INSERT INTO reviews (caregiver_id, parent_name, content, timestamp)
-                    VALUES (?,?,?,?)
-                """, (
-                    st.session_state.matched_id,
-                    st.session_state.get("user_name", "부모님"),
-                    txt,
-                    datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                ))
-            st.session_state.review_input = ""
-            st.success("✅ 후기 등록 완료!")
+            try:
+                # FastAPI 서버의 /reviews/ 엔드포인트 호출
+                response = requests.post(
+                    "http://localhost:8005/reviews/",
+                    json={
+                        "caregiver_id": st.session_state.matched_id,
+                        "parent_name": st.session_state.get("user_name", "부모님"),
+                        "content": txt
+                    }
+                )
+                response.raise_for_status()
+                st.session_state.review_input = ""
+                st.success("✅ 후기 등록 완료!")
+            except Exception as e:
+                st.error(f"후기 등록 중 오류 발생: {str(e)}")
 
         st.text_input("후기를 입력하세요 (엔터로 제출)", key="review_input",
                       placeholder="엔터 키로 제출", on_change=add_review)
@@ -1427,14 +1430,27 @@ def page_caregiver_list():
         rows = cur.fetchall()
 
     def matches(row):
-        _, _, _, _, days_str, _, _, amin, amax, *_ = row
+        _, name, _, _, days_str, _, _, amin, amax, *_ = row
         days = expand_days(days_str)
+
+        # 이름 필터
+        if filter_name != "전체" and name != filter_name:
+            return False
+
+        # 요일 필터
         if filter_day != "전체" and filter_day not in days:
             return False
-        if filter_age == "0~2세": return amax <= 2
-        if filter_age == "3~5세": return amin <= 5 and amax >= 3
-        if filter_age == "6세 이상": return amin >= 6
+
+        # 아동 연령 필터
+        if filter_age == "0~2세":
+            return amax <= 2
+        if filter_age == "3~5세":
+            return amin <= 5 and amax >= 3
+        if filter_age == "6세 이상":
+            return amin >= 6
+
         return True
+
 
     caregivers = [r for r in rows if matches(r)]
     if not caregivers:
@@ -1562,7 +1578,6 @@ def page_caregiver_list():
 
     with col_next:
         st.markdown(f"<p style='text-align:center;'></p>", unsafe_allow_html=True)
-
 
  
 # ───────────────────────────────────────────────
@@ -1764,9 +1779,21 @@ def page_recommend_conditions():
     # ───── 특수아동 여부 ─────
     st.markdown("####  특수아동 수용 여부")
     special_child = st.radio("", ["O", "X"], horizontal=True)
-    # ───── 연령대 설정 ─────
-    st.markdown("####  수용 가능 연령대")
-    age_range = st.slider("연령 범위 (단위: 세)", 0.25, 12.0, (2.0, 7.0), step=0.25, format="%.2f")
+    # ───── 아이 나이 설정 (단일 값 입력) ─────
+    st.markdown("####  아이 나이")
+    age_input = st.text_input("아이 나이 (단위: 세)", placeholder="예: 4")
+
+    if age_input.strip():
+        try:
+            age = int(age_input)
+            if age < 0 or age > 20:
+                st.warning("0세 이상 20세 이하로 입력해주세요.")
+                st.stop()
+        except ValueError:
+            st.warning("아이 나이는 숫자로 입력해주세요.")
+            st.stop()
+    else:
+        age = None  # 아직 입력 안 했을 경우
 
     # ───── 저장 및 다음 단계 ─────
     col1, col2 = st.columns([5, 1])
@@ -1788,11 +1815,15 @@ def page_recommend_conditions():
                 "available_days": selected_days,
                 "available_times": st.session_state.recommend_time_slots,
                 "special_child_required": special_child,
-                "age_min": age_range[0],
-                "age_max": age_range[1]
+                "age": age  # ✅ 여기!
             }
 
-            st.session_state.page = "recommend"  # 다음 페이지로 이동
+            # ✅ 터미널에 출력 (디버깅용)
+            import json
+            print("🔍 추천 조건 설정 결과:")
+            print(json.dumps(st.session_state.recommend_conditions, indent=2, ensure_ascii=False))
+
+            st.session_state.page = "recommend"
             st.rerun()
 
 

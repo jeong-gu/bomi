@@ -9,15 +9,17 @@ from dotenv import load_dotenv
 import os
 import openai
 import logging
-from sqlalchemy import and_, create_engine, or_
+from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
-from scipy.special import softmax 
 from models import Base, User, UserRole, Caregiver, UserPreference,Parent,Review
 from passlib.context import CryptContext
 from fastapi.responses import JSONResponse
 from typing import Optional, Dict, List
 from sentence_transformers import SentenceTransformer
 import numpy as np
+import traceback
+import json, re
+from sqlalchemy.orm import Session
 
 # 환경 변수 로드
 load_dotenv()
@@ -115,14 +117,14 @@ caregiver_questions = [
     "하루 중 아이와 함께하는 루틴이나 중요하게 생각하는 생활 습관이 있으신가요?",
     "아이와 함께하면서 가장 즐거웠던 순간은 언제였나요?",
     "예상치 못한 돌발 상황(예: 아이가 갑자기 아플 때)이 생기면, 어떻게 대처해오셨나요?",
-    "아이를 돌봐주시는 분에게 가장 바라는 ‘마음가짐’은 어떤 모습일까요?",
+    "아이를 돌봐주시는 분에게 가장 바라는 '마음가짐'은 어떤 모습일까요?",
     "아이와 관계를 맺는 데 있어 중요하다고 느끼는 태도나 자세가 있다면요?",
-    "돌봄은 한두 번보다 꾸준함이 중요하다고 하잖아요, 소중하게 생각하는 ‘꾸준함’이 있다면 어떤 걸까요?",
+    "돌봄은 한두 번보다 꾸준함이 중요하다고 하잖아요, 소중하게 생각하는 '꾸준함'이 있다면 어떤 걸까요?",
     "아이를 돌보는 과정에서 가족끼리 나누는 역할이나 분위기는 어떤 편인가요?",
     "누군가에게 중요한 일을 맡기게 될 때, 어떤 부분에서 신뢰를 느끼시나요?",
     "새로운 사람과 처음 만날 때, 어떤 인상을 받을 때 안심이 되시나요?",
     "아이에게 말을 걸거나 대화할 때, 어떤 말투나 표현을 좋아하세요?",
-    "부탁한 일이 정확하게 이뤄졌을 때, 어떤 점에서 ‘잘 해주셨다’고 느끼시나요?",
+    "부탁한 일이 정확하게 이뤄졌을 때, 어떤 점에서 '잘 해주셨다'고 느끼시나요?",
     "특별히 바쁘거나 도움이 급히 필요할 때, 돌보미가 어떤 태도로 응대해주면 좋을까요?",
 ]
 
@@ -146,7 +148,6 @@ caregiver_questions = [
 
 @app.post("/register")
 def register_user(req: RegisterRequest, db: Session = Depends(get_db)):
-    print("💡 받은 req:", req.dict())
     if db.query(User).filter(User.email == req.email).first():
         raise HTTPException(status_code=400, detail="이미 존재하는 이메일입니다.")
 
@@ -212,52 +213,6 @@ def login_user(req: LoginRequest, db: Session = Depends(get_db)):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"서버 오류: {str(e)}")
-    
-
-    
-logger = logging.getLogger("main")
-
-# @app.post("/user/preference")
-# def save_user_preference(req: PreferenceRequest, db: Session = Depends(get_db)):
-#     user = db.query(User).filter(User.email == req.email).first()
-#     if not user:
-#         raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다.")
-
-#     try:
-#         # ✅ GPT 임베딩 생성 및 직렬화
-#         embedding = embedding_model.embed_documents([req.summary])[0]
-#         pickled_embedding = pickle.dumps(embedding)
-
-#         # ✅ 기존 preference 존재 시 update, 없으면 insert
-#         existing_pref = db.query(UserPreference).filter_by(user_id=user.id).first()
-
-#         if existing_pref:
-#             # 🔄 기존 preference 업데이트
-#             existing_pref.preferred_style = req.summary
-#             existing_pref.embedding = pickled_embedding
-#             logger.info(f"[업데이트] user_id={user.id}")
-#         else:
-#             # 🆕 새로운 preference 추가
-#             new_pref = UserPreference(
-#                 user_id=user.id,
-#                 preferred_style=req.summary,
-#                 embedding=pickled_embedding
-#             )
-#             db.add(new_pref)
-#             logger.info(f"[삽입] user_id={user.id}")
-
-#         db.commit()
-#         return {"message": "성향 저장 완료"}
-
-#     except Exception as e:
-#         db.rollback()
-#         logger.error(f"성향 분석 실패: {e}")
-#         raise HTTPException(status_code=500, detail="성향 분석 중 오류 발생")
-    
-    
-class UserChatRequest(BaseModel):
-    email: str
-    history: List[str]
     
     
 # SBERT 모델 초기화
@@ -344,16 +299,11 @@ def generate_vectors_from_summary(summary: str) -> Dict[str, List[float]]:
                 )
                 similarities.append(float(similarity))
             
-            # # 유사도를 0~1 범위로 정규화
-            # similarities = np.array(similarities)
-            # similarities = (similarities - similarities.min()) / (similarities.max() - similarities.min() + 1e-8)
-            
-            # category_embeddings[category] = similarities.tolist()
-            
-            # 기존 min-max 정규화 대신 softmax 사용
+            # 유사도를 0~1 범위로 정규화
             similarities = np.array(similarities)
-            softmax_similarities = softmax(similarities)
-            category_embeddings[category] = softmax_similarities.tolist()
+            similarities = (similarities - similarities.min()) / (similarities.max() - similarities.min() + 1e-8)
+            
+            category_embeddings[category] = similarities.tolist()
 
         return category_embeddings
 
@@ -361,42 +311,6 @@ def generate_vectors_from_summary(summary: str) -> Dict[str, List[float]]:
         print(f"벡터 생성 중 오류 발생: {str(e)}")
         return {}
     
-
-    
-@app.post("/user/preference/from-chat")
-def generate_preference_from_chat(req: UserChatRequest, db: Session = Depends(get_db)):
-    try:
-        # GPT로 요약 생성
-        summary = generate_summary_with_gpt(req.history, "고객")
-        if not summary:
-            raise HTTPException(status_code=500, detail="요약 생성 실패")
-
-        # SBERT로 벡터 생성
-        vectors = generate_vectors_from_summary(summary)
-        if not vectors:
-            raise HTTPException(status_code=500, detail="벡터 생성 실패")
-
-        # 사용자 찾기
-        user = db.query(User).filter(User.email == req.email).first()
-        if not user:
-            raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다.")
-
-        # 벡터만 반환 (DB 저장 없이)
-        return JSONResponse(content={
-            "message": "성향 벡터가 성공적으로 생성되었습니다.",
-            "vectors": vectors
-        })
-
-    except Exception as e:
-        print("❌ 오류 발생:", str(e))
-        print(traceback.format_exc())
-        raise HTTPException(status_code=500, detail=str(e))
-
-class RecommendationRequest(BaseModel):
-    vectors: Dict[str, List[float]]  # history 대신 vectors를 받도록 수정
-    history: List[str]  # 가중치 계산을 위해 필요
-    conditions: Optional[Dict] = {}
-
 def calculate_dynamic_weights(history: List[str]) -> Dict[str, float]:
     """대화 내용을 분석하여 카테고리별 가중치를 동적으로 계산"""
     try:
@@ -479,84 +393,113 @@ def normalize_vectors(vectors: Dict[str, List[float]]) -> Dict[str, List[float]]
         else:
             normalized[category] = vec
     return normalized
+    
+logger = logging.getLogger("main")
 
+@app.post("/user/preference")
+def save_user_preference(req: PreferenceRequest, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.email == req.email).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다.")
+
+    try:
+        # ✅ GPT 임베딩 생성 및 직렬화
+        embedding = embedding_model.embed_documents([req.summary])[0]
+        pickled_embedding = pickle.dumps(embedding)
+
+        # ✅ 기존 preference 존재 시 update, 없으면 insert
+        existing_pref = db.query(UserPreference).filter_by(user_id=user.id).first()
+
+        if existing_pref:
+            # 🔄 기존 preference 업데이트
+            existing_pref.preferred_style = req.summary
+            existing_pref.embedding = pickled_embedding
+            logger.info(f"[업데이트] user_id={user.id}")
+        else:
+            # 🆕 새로운 preference 추가
+            new_pref = UserPreference(
+                user_id=user.id,
+                preferred_style=req.summary,
+                embedding=pickled_embedding
+            )
+            db.add(new_pref)
+            logger.info(f"[삽입] user_id={user.id}")
+
+        db.commit()
+        return {"message": "성향 저장 완료"}
+
+    except Exception as e:
+        db.rollback()
+        logger.error(f"성향 분석 실패: {e}")
+        raise HTTPException(status_code=500, detail="성향 분석 중 오류 발생")
+    
+    
+class UserChatRequest(BaseModel):
+    email: str
+    history: List[str]
+    
+@app.post("/user/preference/from-chat")
+def generate_preference_from_chat(req: UserChatRequest, db: Session = Depends(get_db)):
+    try:
+        # GPT로 요약 생성
+        summary = generate_summary_with_gpt(req.history, "고객")
+        if not summary:
+            raise HTTPException(status_code=500, detail="요약 생성 실패")
+
+        # SBERT로 벡터 생성
+        vectors = generate_vectors_from_summary(summary)
+        if not vectors:
+            raise HTTPException(status_code=500, detail="벡터 생성 실패")
+
+        # 사용자 찾기
+        user = db.query(User).filter(User.email == req.email).first()
+        if not user:
+            raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다.")
+
+        # 벡터만 반환 (DB 저장 없이)
+        return JSONResponse(content={
+            "message": "성향 벡터가 성공적으로 생성되었습니다.",
+            "vectors": vectors
+        })
+
+    except Exception as e:
+        print("❌ 오류 발생:", str(e))
+        print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=str(e))
+
+class RecommendationRequest(BaseModel):
+    vectors: Dict[str, List[float]]  # history 대신 vectors를 받도록 수정
+    history: List[str]  # 가중치 계산을 위해 필요
+    
 @app.post("/recommend/caregiver")
 async def recommend_caregiver(req: RecommendationRequest, db: Session = Depends(get_db)):
     try:
+        # 요청 데이터 로깅
         print("📨 받은 JSON 데이터:")
         print("vectors:", json.dumps(req.vectors, indent=2, ensure_ascii=False))
         print("history:", json.dumps(req.history, indent=2, ensure_ascii=False))
-        print("conditions:", json.dumps(req.conditions, indent=2, ensure_ascii=False))
+        
+        # 1. 사용자 찾기
+        #user = db.query(User).filter(User.email == req.email).first()
+        #if not user:
+        #    raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다.")
 
+        # 2. 벡터 데이터 확인
         vectors = req.vectors
         if not vectors:
             raise HTTPException(status_code=400, detail="벡터 데이터가 없습니다.")
 
+        # 3. 가중치 계산
         weights = calculate_dynamic_weights(req.history)
-        print(weights)
-        # ✅ 1. 조건 기반 필터링
-        query = db.query(Caregiver)
-        cond = req.conditions or {}
 
-        # 🗓 요일 조건
-        if cond.get("available_days"):
-            for day in cond["available_days"]:
-                query = query.filter(Caregiver.available_days.like(f"%{day}%"))
 
-        # 👶 특수아동 조건
-        if cond.get("special_child_required") == "O":
-            query = query.filter(Caregiver.special_child == True)
-        elif cond.get("special_child_required") == "X":
-            query = query.filter(Caregiver.special_child == False)
-
-        # 👧 연령 조건
-        age = cond.get("age")
-        if age is not None:
-            query = query.filter(
-                Caregiver.age_min <= age,
-                Caregiver.age_max >= age
-            )
-
-        # 결과 조회
-        caregivers = query.all()
-        print(f"🔍 조건 필터 후 전체 돌보미 수: {len(caregivers)}")
-
-        filtered_caregivers = []
-
-        if cond.get("available_times"):
-            desired_slots = cond["available_times"]  # 부모가 원하는 시간대 리스트
-
-            for caregiver in caregivers:
-                try:
-                    caregiver_slots = json.loads(caregiver.available_times)
-                except:
-                    continue
-
-                matched = False
-                for parent_slot in desired_slots:
-                    for care_slot in caregiver_slots:
-                        # 부모의 원하는 시간이 돌보미 범위 안에 포함되는지 검사
-                        if parent_slot["start"] >= care_slot["start"] and parent_slot["end"] <= care_slot["end"]:
-                            matched = True
-                            break
-                    if matched:
-                        break
-
-                if matched:
-                    filtered_caregivers.append(caregiver)
-        else:
-            # 시간 조건 없으면 전부 포함
-            filtered_caregivers = caregivers
-
-        print(f"✅ 시간 조건 반영 후 돌보미 수: {len(filtered_caregivers)}")
-        caregivers=filtered_caregivers
-
-        #caregivers = db.query(Caregiver).all() 
-        #print(f"✅ 조건 필터 후 남은 돌보미 수: {len(caregivers)}")
+        # 4. 모든 돌보미 가져오기
+        caregivers = db.query(Caregiver).all()
         similarities = []
 
-        # ✅ 2. 벡터 기반 유사도 계산
+        # 5. 각 돌보미와의 유사도 계산
         for caregiver in caregivers:
+            # 돌보미 벡터 생성 및 정규화
             caregiver_vectors = {
                 "parenting_style_vector": json.loads(caregiver.parenting_style_vector),
                 "personality_traits_vector": json.loads(caregiver.personality_traits_vector),
@@ -568,15 +511,19 @@ async def recommend_caregiver(req: RecommendationRequest, db: Session = Depends(
             }
             caregiver_vectors = normalize_vectors(caregiver_vectors)
 
+            # 각 카테고리별 코사인 유사도 계산
             category_similarities = {}
             for category in vectors.keys():
                 user_vec = np.array(vectors[category])
                 care_vec = np.array(caregiver_vectors[category])
+                
+                # 코사인 유사도 계산
                 similarity = np.dot(user_vec, care_vec) / (
                     np.linalg.norm(user_vec) * np.linalg.norm(care_vec)
                 )
                 category_similarities[category] = float(similarity)
 
+            # 전체 유사도 계산 (동적 가중치 적용)
             total_similarity = sum(
                 category_similarities[cat] * weights[cat]
                 for cat in weights.keys()
@@ -584,17 +531,22 @@ async def recommend_caregiver(req: RecommendationRequest, db: Session = Depends(
 
             similarities.append((total_similarity, caregiver, category_similarities))
 
+        # 6. 상위 3명 추출
         top3 = sorted(similarities, key=lambda x: x[0], reverse=True)[:3]
 
+        # 7. 결과 포맷팅
         result = []
         for total_sim, caregiver, cat_sims in top3:
+            # GPT로 추천 이유 생성
             explanation = generate_recommendation_explanation(caregiver, vectors, cat_sims)
+            
             result.append({
                 "name": caregiver.user.username,
                 "age": caregiver.age,
                 "total_similarity": round(total_sim, 4),
                 "category_similarities": {
-                    cat: round(sim, 4) for cat, sim in cat_sims.items()
+                    cat: round(sim, 4)
+                    for cat, sim in cat_sims.items()
                 },
                 "explanation": explanation
             })
@@ -714,11 +666,7 @@ def caregiver_rag_response(req: QueryRequest):
         raise HTTPException(status_code=500, detail=f"답변 생성 실패: {e}")
 
 
-from pydantic import BaseModel
-from typing import List, Dict, Optional
-import json, re
-from fastapi import HTTPException, Depends
-from sqlalchemy.orm import Session
+
 
 # ────────────────────────────────────────────────
 # 🚩 Pydantic Models
@@ -745,8 +693,6 @@ class VectorUpdateRequest(BaseModel):
 # 🚩 성향 추출 API
 # ────────────────────────────────────────────────
  
-import traceback
-
 @app.post("/caregiver/personality/from-chat")
 def analyze_personality_from_chat(data: ChatHistoryRequest, db: Session = Depends(get_db)):
     try:
@@ -911,39 +857,39 @@ def generate_recommendation_explanation(caregiver: Caregiver, user_vectors: Dict
     total_similarity = sum(category_similarities.values()) / len(category_similarities)
     
     prompt = f"""
-        당신은 따뜻한 공감 능력을 지닌 육아 전문가입니다.  
-        아래 ‘돌보미 정보’와 ‘사용자 감정·성향 벡터’ 간의 유사도를 바탕으로,  
-        왜 이 돌보미가 사용자에게 적합한지 공감 어린 말투로 정성스럽게 설명해 주세요.
+        당신은 따뜻한 공감 능력을 가진 육아 전문가입니다.  
+        아래 돌보미 정보를 바탕으로, 사용자의 감정·성향 벡터와의 유사도를 반영하여  
+        이 돌보미가 왜 적합한지 공감 어린 말투로 정성스럽게 설명해주세요.
 
-        ※ 모든 출력은 반드시 아래 형식과 문체를 그대로 따릅니다.  
-        ※ 특히 ‘카테고리별 강점 Top 3’의 각 항목 이름은 한국어로만 표기하고,  
-        설명은 따뜻하고 구체적이며 사용자 관점에서 공감하도록 작성합니다.  
-        ※ 이모지는 절대 사용하지 않습니다.
+        📌 모든 출력은 아래 구조와 문체를 엄격히 통일하여 작성해 주세요.  
+        특히 **카테고리별 강점 Top 3**는 사용자와의 유사도가 높은 상위 3개 항목을 기반으로 작성하며,  
+        각 항목명은 한국어로 표기하고, 설명은 공감 어린 말투로 따뜻하고 구체적으로 적어주세요.
 
-        ────────────────────────────────────────
-        <추천 이유>
+        ---
 
-        ■ 어떤 돌보미일까?
-        이 돌보미는 사용자의 감정과 성향에서 특히 **〈유사도 상위 1위 항목〉**, **〈유사도 상위 2위 항목〉** 같은 측면에서 깊이 공감할 수 있는 특성이 있으며, 아이에게 안정적이고 따뜻한 돌봄을 제공할 수 있는 적임자입니다.
 
-        ■ 카테고리별 강점 Top 3  
-        1. 〈유사도 상위 1위 항목〉: 해당 특성이 어떻게 사용자와 깊이 통하고 아이 돌봄에 긍정적으로 작용하는지 구체적으로 설명해 주세요.  
-        2. 〈유사도 상위 2위 항목〉: 위와 같은 형식으로 공감 어린 설명을 적어 주세요.  
-        3. 〈유사도 상위 3위 항목〉: 위와 같은 형식으로 공감 어린 설명을 적어 주세요.  
+        🧩 어떤 돌보미일까? 
+        '이 돌보미는 사용자의 감정과 성향에서 특히 유사도 상위 1위 항목, 유사도 상위 2위 항목목같은 측면에서  
+        깊이 공감할 수 있는 특성이 있으며, 아이에게 안정적이고 따뜻한 돌봄을 제공할 수 있는 적임자입니다.' 와 비슷한 형식으로 적어주세요.
 
-        ■ 이 돌보미는 어떻게 대응할까?
-        실제 돌봄 상황에서 이 돌보미가 보여 줄 반응을 한 가지 예로 들어 서술한 뒤,  
-        사용자에게 따뜻한 조언이나 위로의 말을 덧붙여 주세요.  
-        예시 상황은 아이가 낯선 환경에서 불안해할 때, 놀이 중 갈등이 생길 때 등으로 자유롭게 설정합니다.
+        💡 카테고리별 강점 Top 3  
+        1. 유사도 상위 1위 항목: 유사도 상위 1위 항목에 대한 설명과 이유  
+        2. 유사도 상위 2위 항목: 유사도 상위 2위 항목에 대한 설명과 이유  
+        3. 유사도 상위 3위 항목: 유사도 상위 3위 항목에 대한 설명과 이유  
 
-        ────────────────────────────────────────
-        주의 사항  
-        - 각 제목(어떤 돌보미일까, 카테고리별 강점 Top 3, 이 돌보미는 어떻게 대응할까)은 그대로 사용합니다.  
-        - 모든 설명은 ‘공감 + 관찰 기반 + 사용자 관점과의 연결’이 되도록 작성합니다.  
-        - 여러 명의 돌보미를 소개할 때도 위 양식을 돌보미마다 동일하게 적용합니다.
-        - 문단별 들여쓰기 띄어쓰기를 적극 사용해서 가독성을 높여주세요.
-            """
+        🎬 이 돌보미는 어떻게 대응할까?
+        실제 아이를 돌보는 상황에서 이 돌보미가 어떤 반응을 보일지 예를 들어 설명하고,  
+        사용자에게 따뜻한 조언이나 위로의 말을 덧붙여주세요.  
+        예: 아이가 낯선 환경에서 불안해할 때, 이 돌보미는 어떻게 반응할까요?
+        위와 같이 예시는 사용자의 대화를 기반으로 랜덤적으로 정해주세요.
 
+        ---
+
+        **주의사항:**  
+        - 항목 제목(추천 이유, 카테고리별 강점 등)은 그대로 유지  
+        - 각각의 설명은 `공감 + 관찰 기반 + 사용자의 관점과 연결`된 서술이어야 함  
+        - 세 명 모두 이 양식을 **완전히 동일하게 따릅니다**
+        """
 
 
     try:
@@ -1043,16 +989,16 @@ def ask_question(req: QueryRequest):
 
             - 질문은 실제 아이돌봄 현장에서 발생할 수 있는 상황을 가정한 **역할극 형식**으로 진행됩니다.
             - 질문은 하나씩 제시되며, 사용자의 응답 후 다음 질문으로 넘어갑니다.
-            - 각 상황은 “○○한 상황에서 어떻게 하시겠어요?” 또는 “이럴 때 어떤 식으로 대응하시겠어요?” 형식으로 자연스럽게 묻습니다.
+            - 각 상황은 "○○한 상황에서 어떻게 하시겠어요?" 또는 "이럴 때 어떤 식으로 대응하시겠어요?" 형식으로 자연스럽게 묻습니다.
             - 모든 질문은 따뜻하고 신뢰감 있는 말투로 진행됩니다.
             - 사용자 반응을 통해 정성적으로 정보를 수집합니다.
 
             [예시 질문들]
 
-            1. “아이가 밥을 먹기 싫다고 울면서 도망다녀요. 어떻게 하시겠어요?”
-            2. “부모님이 갑자기 외출하셔야 한다며 오늘은 밤 10시까지 아이를 봐줄 수 있겠냐고 요청하세요. 평소보다 2시간 늦는 시간이지만 추가 요청은 처음이에요. 어떻게 반응하시겠어요?”
-            3. “아이를 돌보는 중 아이가 갑자기 열이 나기 시작했는데, 부모님은 연락이 닿지 않아요. 어떻게 대처하시겠어요?”
-            4. “부모님이 ‘우리 아이는 까다로운 편이라 힘드실 거예요’라고 말했을 때, 뭐라고 답하시겠어요?”
+            1. "아이가 밥을 먹기 싫다고 울면서 도망다녀요. 어떻게 하시겠어요?"
+            2. "부모님이 갑자기 외출하셔야 한다며 오늘은 밤 10시까지 아이를 봐줄 수 있겠냐고 요청하세요. 평소보다 2시간 늦는 시간이지만 추가 요청은 처음이에요. 어떻게 반응하시겠어요?"
+            3. "아이를 돌보는 중 아이가 갑자기 열이 나기 시작했는데, 부모님은 연락이 닿지 않아요. 어떻게 대처하시겠어요?"
+            4. "부모님이 '우리 아이는 까다로운 편이라 힘드실 거예요'라고 말했을 때, 뭐라고 답하시겠어요?"
 
             [주의 사항]
 
@@ -1082,7 +1028,7 @@ def ask_question(req: QueryRequest):
     except Exception as e:
         logger.error(f"/ask/ 오류: {str(e)}")
         raise HTTPException(status_code=500, detail=f"답변 생성 실패: {e}")
-
+    
 def calculate_review_weights(review: Review) -> float:
     """리뷰의 가중치를 계산하는 함수"""
     # 1. 시간 가중치 (최근 리뷰일수록 높은 가중치)
@@ -1139,7 +1085,7 @@ def generate_review_vectors(review_content: str) -> Dict[str, List[float]]:
         return {}
 
 def update_caregiver_vectors_from_review(caregiver: Caregiver, review_vectors: Dict[str, List[float]], weight: float):
-    """리뷰 벡터를 기반으로 돌보미의 성향 벡터를 업데이트하는 함수 (지수 감쇠 적용)"""
+    """리뷰 벡터를 기반으로 돌보미의 성향 벡터를 업데이트하는 함수"""
     vector_fields = [
         "parenting_style_vector",
         "personality_traits_vector",
@@ -1150,29 +1096,18 @@ def update_caregiver_vectors_from_review(caregiver: Caregiver, review_vectors: D
         "trust_time_vector"
     ]
 
-    def exponential_update_with_boost_floor(current, target, weight, boost=1.5):
-        """
-        target: 리뷰에서 추출된 성향 (0~1 예상)
-        current: 현재 돌보미의 성향 점수
-        weight: 리뷰 신뢰도 (0~1)
-        boost: 강하게 반영되도록 하는 강화 계수 (기본 1.5)
-        """
-        diff = target - current
-        adjustment = diff * weight * (1 - abs(current)) * boost
-        updated = current + adjustment
-        return min(1.0, max(0.0, updated))  # 0~1로 제한
-  
-
     for field in vector_fields:
         current_vector = json.loads(getattr(caregiver, field) or "[]")
         review_vector = review_vectors.get(field, [0.0] * len(current_vector))
         
+        # 가중 평균으로 벡터 업데이트
         updated_vector = [
-            exponential_update_with_boost_floor(c, r,weight) for c, r in zip(current_vector, review_vector)
+            (current * (1 - weight) + review * weight)
+            for current, review in zip(current_vector, review_vector)
         ]
         
         setattr(caregiver, field, json.dumps(updated_vector))
-        
+
 @app.post("/reviews/", response_model=ReviewRead)
 def create_review(req: ReviewCreate, db: Session = Depends(get_db)):
     # 1. 리뷰 생성
