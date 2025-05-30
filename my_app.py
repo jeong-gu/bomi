@@ -481,8 +481,18 @@ def page_start():
                             st.session_state.page = "caregiver_personality"
                             st.rerun()
 
+                        except requests.exceptions.HTTPError as e:
+                            # 🔎 HTTP 응답 에러인 경우: detail 메시지를 꺼내서 보여주기
+                            try:
+                                error_detail = res.json().get("detail", "알 수 없는 오류입니다.")
+                                st.error(f"❗ {error_detail}")
+                            except Exception:
+                                st.error(f"❗ 회원가입 중 오류 발생: {e}")
+                            st.stop()
+
                         except requests.exceptions.RequestException as e:
-                            st.error(f"회원가입 중 오류 발생: {e}")
+                            # 🔧 기타 네트워크 오류 등 처리
+                            st.error(f"❗ 서버에 연결할 수 없습니다: {e}")
                             st.stop()
 
 
@@ -573,7 +583,7 @@ def page_caregiver_home():
             st.rerun()
     with cols[1]:
         if st.button("🎯\n성향분석", key="care_recommend"):
-            st.session_state.page = "recommend"
+            st.session_state.page = "caregiver_personality"
             st.rerun()
     with cols[2]:
         if st.button("📊\n요금산정", key="care_pricing"):

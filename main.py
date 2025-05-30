@@ -145,6 +145,7 @@ caregiver_questions = [
 
 @app.post("/register")
 def register_user(req: RegisterRequest, db: Session = Depends(get_db)):
+    print("💡 받은 req:", req.dict())
     if db.query(User).filter(User.email == req.email).first():
         raise HTTPException(status_code=400, detail="이미 존재하는 이메일입니다.")
 
@@ -393,42 +394,42 @@ def normalize_vectors(vectors: Dict[str, List[float]]) -> Dict[str, List[float]]
     
 logger = logging.getLogger("main")
 
-@app.post("/user/preference")
-def save_user_preference(req: PreferenceRequest, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.email == req.email).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다.")
+# @app.post("/user/preference")
+# def save_user_preference(req: PreferenceRequest, db: Session = Depends(get_db)):
+#     user = db.query(User).filter(User.email == req.email).first()
+#     if not user:
+#         raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다.")
 
-    try:
-        # ✅ GPT 임베딩 생성 및 직렬화
-        embedding = embedding_model.embed_documents([req.summary])[0]
-        pickled_embedding = pickle.dumps(embedding)
+#     try:
+#         # ✅ GPT 임베딩 생성 및 직렬화
+#         embedding = embedding_model.embed_documents([req.summary])[0]
+#         pickled_embedding = pickle.dumps(embedding)
 
-        # ✅ 기존 preference 존재 시 update, 없으면 insert
-        existing_pref = db.query(UserPreference).filter_by(user_id=user.id).first()
+#         # ✅ 기존 preference 존재 시 update, 없으면 insert
+#         existing_pref = db.query(UserPreference).filter_by(user_id=user.id).first()
 
-        if existing_pref:
-            # 🔄 기존 preference 업데이트
-            existing_pref.preferred_style = req.summary
-            existing_pref.embedding = pickled_embedding
-            logger.info(f"[업데이트] user_id={user.id}")
-        else:
-            # 🆕 새로운 preference 추가
-            new_pref = UserPreference(
-                user_id=user.id,
-                preferred_style=req.summary,
-                embedding=pickled_embedding
-            )
-            db.add(new_pref)
-            logger.info(f"[삽입] user_id={user.id}")
+#         if existing_pref:
+#             # 🔄 기존 preference 업데이트
+#             existing_pref.preferred_style = req.summary
+#             existing_pref.embedding = pickled_embedding
+#             logger.info(f"[업데이트] user_id={user.id}")
+#         else:
+#             # 🆕 새로운 preference 추가
+#             new_pref = UserPreference(
+#                 user_id=user.id,
+#                 preferred_style=req.summary,
+#                 embedding=pickled_embedding
+#             )
+#             db.add(new_pref)
+#             logger.info(f"[삽입] user_id={user.id}")
 
-        db.commit()
-        return {"message": "성향 저장 완료"}
+#         db.commit()
+#         return {"message": "성향 저장 완료"}
 
-    except Exception as e:
-        db.rollback()
-        logger.error(f"성향 분석 실패: {e}")
-        raise HTTPException(status_code=500, detail="성향 분석 중 오류 발생")
+#     except Exception as e:
+#         db.rollback()
+#         logger.error(f"성향 분석 실패: {e}")
+#         raise HTTPException(status_code=500, detail="성향 분석 중 오류 발생")
     
     
 class UserChatRequest(BaseModel):
