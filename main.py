@@ -1,3 +1,4 @@
+from datetime import datetime
 import pickle
 from typing import Optional
 from fastapi import FastAPI, HTTPException, Depends
@@ -10,7 +11,7 @@ import openai
 import logging
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
-from models import Base, User, UserRole, Caregiver, UserPreference,Parent
+from models import Base, User, UserRole, Caregiver, UserPreference,Parent,Review
 from passlib.context import CryptContext
 from fastapi.responses import JSONResponse
 from typing import Optional, Dict, List
@@ -35,7 +36,8 @@ Base.metadata.create_all(bind=engine)
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-
+# 리뷰 API URL (Streamlit 쪽에서 사용)
+REVIEW_API_URL = "http://localhost:8005/reviews"
 
 class QueryRequest(BaseModel):
     prompt: str
@@ -82,6 +84,20 @@ class ChatPreferenceRequest(BaseModel):
 class RecommendationRequest(BaseModel):
     email: str
 
+class ReviewCreate(BaseModel):
+    caregiver_id: int
+    parent_name:  str
+    content:      str
+
+class ReviewRead(BaseModel):
+    id:           int
+    caregiver_id: int
+    parent_name:  str
+    content:      str
+    timestamp:    datetime
+    
+    class Config:
+        orm_mode = True
 
 def get_db():
     db = SessionLocal()
@@ -734,3 +750,21 @@ def ask_question(req: QueryRequest):
     except Exception as e:
         logger.error(f"/ask/ 오류: {str(e)}")
         raise HTTPException(status_code=500, detail=f"답변 생성 실패: {e}")
+    
+@app.post("/reviews/", response_model=ReviewRead)
+def create_review(req: ReviewCreate, db: Session = Depends(get_db)):
+    review = Review(
+        caregiver_id=req.caregiver_id,
+        parent_name=req.parent_name,
+        content=req.content,
+        timestamp=datetime.utcnow()
+    )
+    db.add(review)
+    db.commit()
+    db.refresh(review)
+    return review
+
+@app.get("/reviews/{caregiver_id}", response_model=List[ReviewRead])
+def list_reviews(caregiver_id: int, db: Session = Depends(get_db)):
+    return db.query(Review).filter(Review.caregiver_id == caregiver_id).all()
+

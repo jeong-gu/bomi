@@ -19,9 +19,9 @@ if "emotion_history" not in st.session_state:
 
 # 1) 전역 설정 & 세션 상태 초기화
 ############################################
-st.set_page_config(page_title="여성가족부 JBNU 챗봇", page_icon="☁️", layout="centered")
+st.set_page_config(page_title="나만의 아이돌, 보미", page_icon="☁️", layout="centered")
 
-RAG_API_URL = "http://localhost:8005/ask/"
+RAG_API_URL = "http://localhost:8005/rag/"
 
 # --------------------------- 세션 기본값 ---------------------------
 if "page" not in st.session_state:
@@ -133,17 +133,23 @@ body {
 ############################################
 
 
-
-
-
 def page_caregiver_personality():
-    """돌보미 성향 자가진단 챗 인터페이스"""
+    import streamlit as st
+    import requests
+    import json
+
     if "caregiver_self_messages" not in st.session_state:
         st.session_state.caregiver_self_messages = [{
             "role": "assistant",
             "content": (
-                "안녕하세요 😊 어떤 돌보미이신가요?\n"
-                "예: '꼼꼼하게 약속을 지키는 편이에요', '아이의 감정에 귀 기울여요'"
+                "안녕하세요\n"
+                "돌보미로서의 나를 소개해보는 시간이에요.\n"
+                "내가 아이들과 어떻게 지내는 편인지, 어떤 성향인지 자유롭게 이야기해 주세요!\n\n"
+                "예시:\n"
+                "- '약속은 꼭 지키려고 해요'\n"
+                "- '아이 눈높이에 맞춰서 대화하려고 노력해요'\n"
+                "- '장난꾸러기 아이들도 귀엽게 봐주는 편이에요'\n\n"
+                "자유롭게 말씀해 주시면, 당신만의 따뜻한 돌봄 스타일을 분석해드릴게요 "
             )
         }]
     if "last_caregiver_self_input" not in st.session_state:
@@ -152,7 +158,7 @@ def page_caregiver_personality():
         st.session_state.waiting_for_trait_response = False
 
     st.markdown("<h3 style='text-align:center;'>📝 돌보미 성향 자가진단</h3>", unsafe_allow_html=True)
-    col_text, col_save = st.columns([5,1])
+    col_text, col_save = st.columns([5, 1])
     with col_save:
         if st.button("저장"):
             history = [m["content"] for m in st.session_state.caregiver_self_messages if m["role"] == "user"]
@@ -166,55 +172,69 @@ def page_caregiver_personality():
                             json={"email": st.session_state.user_email, "history": history}
                         )
                         res1.raise_for_status()
-                        traits = res1.json().get("traits", {})
+                        # GPT 분석 결과 받기
+                        vectors = res1.json().get("vectors", {})
 
-                        # 누락된 항목 보완 (모든 trait이 빠졌을 경우도 대응)
-                        default_traits = {
-                            "diligent": 0.1,
-                            "sociable": 0.1,
-                            "cheerful": 0.1,
-                            "warm": 0.1,
-                            "positive": 0.1,
-                            "observant": 0.1
+                        categories = [
+                            "parenting_style_vector",
+                            "personality_traits_vector",
+                            "communication_style_vector",
+                            "caregiving_attitude_vector",
+                            "handling_situations_vector",
+                            "empathy_traits_vector",
+                            "trust_time_vector"
+                        ]
+
+                        category_to_length = {
+                            "parenting_style_vector": 8,
+                            "personality_traits_vector": 10,
+                            "communication_style_vector": 5,
+                            "caregiving_attitude_vector": 6,
+                            "handling_situations_vector": 4,
+                            "empathy_traits_vector": 4,
+                            "trust_time_vector": 3
                         }
-                        for k, v in default_traits.items():
-                            traits[k] = traits.get(k, v)
 
+                        # 누락된 항목은 0.0으로 채움
+                        for cat in categories:
+                            if cat not in vectors:
+                                vectors[cat] = [0.0] * category_to_length[cat]
+
+                        # 서버에 업데이트 요청
                         res2 = requests.post(
-                            "http://localhost:8005/caregiver/update-traits",
-                            json={"email": st.session_state.user_email, **traits}
+                            "http://localhost:8005/caregiver/update-vectors",
+                            json={"email": st.session_state.user_email, **vectors}
                         )
                         res2.raise_for_status()
 
-                        st.success("성향 점수가 성공적으로 저장되었어요! 🎉\n홈 화면으로 이동합니다.")
+                        # 성공 메시지 출력
+                        st.success("성향 벡터가 성공적으로 저장되었어요! \n홈 화면으로 이동합니다.")
                         st.session_state.page = "start"
                         st.rerun()
+
 
                     except requests.exceptions.RequestException as e:
                         st.error(f"서버 요청 중 오류 발생: {e}")
                     except Exception as e:
                         st.error(f"예기치 않은 오류: {e}")
 
-
-
-
-    # — 챗 기록 렌더링 —
+    # 채팅 렌더링
     html = '<div class="chat-container">'
     if st.session_state.waiting_for_trait_response:
         html += '<div class="loading-bubble">답변 생성 중...</div>'
     for msg in st.session_state.caregiver_self_messages:
-        cls = "user-bubble" if msg["role"]=="user" else "assistant-bubble"
-        tag = "Q:" if msg["role"]=="user" else "A:"
+        cls = "user-bubble" if msg["role"] == "user" else "assistant-bubble"
+        tag = "Q:" if msg["role"] == "user" else "A:"
         html += f'<div class="{cls}"><strong>{tag}</strong> {msg["content"]}</div>'
     html += "</div>"
     st.markdown(html, unsafe_allow_html=True)
 
-    # — 입력창 —
+    # 입력창
     def _on_enter():
         ui = st.session_state.caregiver_self_input
         if not ui or ui == st.session_state.last_caregiver_self_input:
             return
-        st.session_state.caregiver_self_messages.append({"role":"user","content":ui})
+        st.session_state.caregiver_self_messages.append({"role": "user", "content": ui})
         st.session_state.last_caregiver_self_input = ui
         st.session_state.waiting_for_trait_response = True
         st.session_state.caregiver_self_input = ""
@@ -223,23 +243,20 @@ def page_caregiver_personality():
                   placeholder="성향에 대해 말씀해주세요!",
                   on_change=_on_enter)
 
-
-
-    # — GPT 호출 및 답변 표시 —
+    # GPT 응답 받기
     if st.session_state.waiting_for_trait_response:
         with st.spinner("답변 생성 중..."):
             resp = requests.post(
-                RAG_API_URL,
+                "http://localhost:8005/caregiver/ask", 
                 json={"prompt": st.session_state.last_caregiver_self_input,
-                      "category":"caregiver_personality"}
+                      "category": "caregiver_personality"}
             )
         answer = resp.json().get("answer", "응답이 없습니다.")
         st.session_state.caregiver_self_messages.append(
-            {"role":"assistant","content":answer}
+            {"role": "assistant", "content": answer}
         )
         st.session_state.waiting_for_trait_response = False
         st.rerun()
-
 
 
 
@@ -355,8 +372,8 @@ def page_start():
 
             # Step 2
             elif st.session_state.caregiver_reg_step == 2:
-                st.subheader("🍼 돌보미 회원가입 - 2단계")
-                st.markdown("돌봄 조건을 설정해주세요.")
+                st.subheader(" 돌봄이 회원가입 - 2단계")
+                st.markdown("돌불 조건을 설정해주세요.")
 
                 days = ["월", "화", "수", "목", "금", "토", "일"]
                 selected_days = []
@@ -367,550 +384,103 @@ def page_start():
                     if cols[i].checkbox(day, value=is_checked, key=f"day_{day}"):
                         selected_days.append(day)
 
-                if st.button("다음 (성향 자가진단)"):
-                    st.session_state.caregiver_temp_data["available_days"] = selected_days
-                    payload = {
-                        **st.session_state.caregiver_temp_data,
-                        "role": "돌보미"
-                    }
-                    try:
-                        response = requests.post("http://localhost:8005/register", json=payload)
-                        if response.status_code == 200:
-                            st.success("회원가입 성공! 성향 자가진단을 진행해 주세요.")
-                            st.session_state.logged_in = True
+                # 시간아웃 (일반 버튼)
+                st.markdown("<h4 style='color: #2c3e50;'>시간대 추가</h4>", unsafe_allow_html=True)
+                if "time_slots" not in st.session_state:
+                    st.session_state.time_slots = st.session_state.caregiver_temp_data.get("available_times", [])
+
+                def add_time_slot():
+                    st.session_state.time_slots.append({"start": 1, "end": 1})
+
+                if st.button("⏰ 시간대 추가", key="add_time"):
+                    add_time_slot()
+
+                for i, slot in enumerate(st.session_state.time_slots):
+                    col1, col2, col3 = st.columns([2, 2, 1])
+                    with col1:
+                        slot["start"] = col1.selectbox("시작 시간", range(1, 25), index=slot["start"]-1, key=f"start_{i}")
+                    with col2:
+                        slot["end"] = col2.selectbox("종료 시간", range(1, 25), index=slot["end"]-1, key=f"end_{i}")
+                    with col3:
+                        if st.button("🗑️", key=f"del_{i}"):
+                            st.session_state.time_slots.pop(i)
+                            st.rerun()
+
+                st.markdown("""
+                <h4 style='color: #2c3e50;'>특수아동 가능여부</h4>
+                """, unsafe_allow_html=True)
+                special_child = st.radio("", ["O", "X"], horizontal=True, key="special_child")
+
+                st.markdown("""
+                <h4 style='color: #2c3e50;'>돌불 가능 연병대</h4>
+                """, unsafe_allow_html=True)
+                age_range = st.slider("", 0.25, 12.0, st.session_state.caregiver_temp_data.get("age_range", (0.25, 12.0)), step=0.25, format="%.2f")
+
+                col1, col2, col3 = st.columns([1, 1, 1])
+                with col1:
+                    if st.button("\u25c0 \uc774전"):
+                        st.session_state.caregiver_temp_data.update({
+                            "available_days": selected_days,
+                            "available_times": st.session_state.time_slots,
+                            "special_child": special_child,
+                            "age_range": list(age_range)
+                        })
+                        st.session_state.caregiver_reg_step = 1
+                        st.rerun()
+
+                # ✅ 돌보미 회원가입 - 2단계 처리
+                with col3:
+                    if st.button("회원가입"):
+                        if not selected_days:
+                            st.warning("가능한 요일을 하나 이상 선택해주세요.")
+                            st.stop()
+                        if not st.session_state.time_slots:
+                            st.warning("가능한 시간대를 하나 이상 추가해주세요.")
+                            st.stop()
+
+                        # 조건 저장
+                        st.session_state.caregiver_temp_data.update({
+                            "available_days": selected_days,
+                            "available_times": st.session_state.time_slots,
+                            "special_child": special_child == "O",
+                            "age_range": list(age_range),
+                            "role": "돌보미"
+                        })
+
+                        # backend 형식에 맞게 conditions 필드 생성
+                        caregiver_info = st.session_state.caregiver_temp_data
+                        conditions = {
+                            "days": caregiver_info["available_days"],
+                            "times": caregiver_info["available_times"],
+                            "special": caregiver_info["special_child"],
+                            "age_min": caregiver_info["age_range"][0],
+                            "age_max": caregiver_info["age_range"][1]
+                        }
+
+                        payload = {
+                            "username": caregiver_info["username"],
+                            "email": caregiver_info["email"],
+                            "password": caregiver_info["password"],
+                            "role": "돌보미",
+                            "age": caregiver_info["age"],
+                            "phone": caregiver_info["phone"],
+                            "conditions": conditions
+                        }
+
+                        try:
+                            res = requests.post("http://localhost:8005/register", json=payload)
+                            res.raise_for_status()
                             st.session_state.user_email = payload["email"]
-                            st.session_state.user_name = payload["username"]
-                            st.session_state.user_role = "돌보미"
-                            st.session_state.phone = payload["phone"]
+
+                            st.success("회원가입이 완료되었습니다! 이제 성향 자가진단을 시작해볼게요.")
                             st.session_state.page = "caregiver_personality"
                             st.rerun()
-                        else:
-                            st.error(response.json()["detail"])
-                    except Exception as e:
-                        st.error(f"서버 오류: {e}")
 
+                        except requests.exceptions.RequestException as e:
+                            st.error(f"회원가입 중 오류 발생: {e}")
+                            st.stop()
 
-
-############################################
-
-
-
-
-
-
-
-# 3) Lottie 애니메이션 로딩(옵션)
-############################################
-def load_lottie_url(url: str):
-    try:
-        r = requests.get(url)
-        if r.status_code == 200:
-            return r.json()
-    except:
-        pass
-    return None
-
-lottie_welcome_url = "https://assets10.lottiefiles.com/packages/lf20_5e7wgehs.json"
-lottie_welcome = load_lottie_url(lottie_welcome_url)
-if "trigger_rerun" not in st.session_state:
-    st.session_state.trigger_rerun = False
-############################################
-
-
-########################################
-# 📝 타이핑 효과 함수 (중앙 정렬 유지)
-def typewriter_effect(text, key, delay=0.1):
-    """한 글자씩 출력하는 효과 (중앙 정렬 유지)"""
-    container = st.empty()
-    displayed_text = ""
-
-    for char in text:
-        displayed_text += char
-        container.markdown(
-            f"<h3 style='text-align: center;'>{displayed_text}</h3>", unsafe_allow_html=True
-        )
-        time.sleep(delay)
-########################################
-
-
-########################################
-def page_userinfo():
-    # 🎈 페이지 진입 시 풍선 효과
-    st.balloons()
-
-    # 🎨 페이지 스타일 설정
-    st.markdown("""
-        <style>
-            /* 전체 컨테이너 높이 조정 */
-            .block-container {
-                min-height: 100vh;  /* 전체 화면 높이 */
-                display: flex;
-                flex-direction: column;
-                justify-content: center;
-                align-items: center;
-            }
-
-            /* 제목과 부제목 스타일 */
-            .title-container {
-                text-align: center;
-                font-weight: bold;
-                font-size: 40px;
-                margin-bottom: 10px;
-                color: #7993c1;
-            }
-            .subtitle {
-                text-align: center;
-                font-size: 11px;
-                color: #7993c1;
-            }
-
-            /* 안내 문구 (아래에 입력 후 Enter를 눌러주세요) 중앙 정렬 */
-            .input-guide {
-                text-align: center;
-                font-size: 12px;
-                font-weight: basic;
-                color: #7993c1;
-                margin-bottom: 5px;
-            }
-        </style>
-    """, unsafe_allow_html=True)
-
-    # 🏡 화면 중앙 정렬 텍스트 (타이핑 효과)
-    typewriter_effect(" 만나서 반가워요!", key="title", delay=0.07)
-    time.sleep(0.5)  # 첫 번째 문장 출력 후 살짝 대기
-    typewriter_effect("이름을 알려주세요!", key="subtitle", delay=0.07)
-
-    # 🌥️ 로딩 애니메이션 or 이미지
-    if lottie_welcome:
-        st_lottie(lottie_welcome, height=250, key="welcome_lottie")
-    else:
-        st.image("https://via.placeholder.com/200x100?text=Loading+Clouds", use_container_width=True)
-
-    # 📝 안내 문구 중앙 정렬
-    st.markdown("<p class='input-guide'>아래에 입력 후 <b>Enter</b>를 눌러주세요</p>", unsafe_allow_html=True)
-
-    # 👤 이름 입력 필드
-    def on_name_submit():
-        if st.session_state.name:
-            st.session_state.user_name = st.session_state.name
-            st.session_state.page = "home"
-            st.session_state.trigger_rerun = True
-
-    st.text_input("", key="name", on_change=on_name_submit, placeholder="이름을 입력해주세요")  # 입력창은 그대로 유지
-
-    # 🔄 trigger_rerun 체크 후 페이지 리로드
-    if st.session_state.trigger_rerun:
-        st.session_state.trigger_rerun = False
-        st.rerun()
-########################################
-
-
-
-# ########################################
-# def page_home():
-#     # ✅ 로그인 확인
-#     if not st.session_state.get("logged_in"):
-#         st.warning("로그인이 필요합니다.")
-#         st.session_state.page = "start"
-#         st.rerun()
-
-#     # ✅ 사용자 이름 초기화
-#     if "user_name" not in st.session_state:
-#         st.session_state.user_name = "사용자"  # 기본값
-
-#     user_name = st.session_state.user_name
-
-#     # 🌟 환영 메시지 중앙 정렬
-#     st.markdown(f"""
-#     <h3 style="text-align: center;">　환영해요, <strong>{user_name}</strong>님.</h3>
-#     <p style="text-align: center;">무엇을 해볼까요?</p>
-#     """, unsafe_allow_html=True)
-
-#     # ✅ CSS 스타일
-#     st.markdown("""
-#         <style>
-#         .block-container {
-#                 min-height: 100vh;
-#                 display: flex;
-#                 flex-direction: column;
-#                 justify-content: center;
-#                 align-items: center;
-#         }
-#         .stButton > button {
-#             display: flex;
-#             flex-direction: column;
-#             justify-content: center;
-#             align-items: center;
-#             width: 100%;
-#             height: 120px;
-#             padding: 10px;
-#             font-size: 40px;
-#             font-weight: bold;
-#             text-align: center;
-#             background: white;
-#             border: 3px solid #7993c1;
-#             border-radius: 25px;
-#             color: #2c3e50;
-#             cursor: pointer;
-#             transition: all 0.3s ease-in-out;
-#             box-shadow: 2px 2px 8px rgba(0, 0, 0, 0.1);
-#             white-space: pre-line;
-#         }
-#         .stButton > button:hover {
-#             background: #7993c1;
-#             color: white;
-#             box-shadow: 2px 2px 10px rgba(74, 111, 165, 0.5);
-#         }
-#         .stButton > button:active {
-#             background: #7993c1;
-#             color: white;
-#             box-shadow: 2px 2px 10px rgba(74, 111, 165, 0.8);
-#         }
-#         </style>
-#     """, unsafe_allow_html=True)
-
-#     # ✅ 버튼 3개 배치
-#     col1, col2, col3, col4 = st.columns(4)
-            
-#     with col1:
-#         if st.button("✮⋆\n정보용\n.", key="chat_btn"):
-#             st.session_state.page = "chat"
-#             st.rerun()
-
-#     with col2:
-#         if st.button("🎯\n추천용\n.", key="recommend_btn"):
-#             # 통합 챗봇으로 바로 이동
-#             st.session_state.page = "recommend"
-#             # 대화 관련 상태 초기화
-#             st.session_state.recommend_messages = []
-#             st.session_state.last_recommend_input = None
-#             st.session_state.waiting_for_recommend_response = False
-#             st.session_state.recommend_done = False
-#             st.session_state.recommendations = []
-#             st.rerun()
-
-#     with col3:
-#         if st.button("📊\n요금\n산정", key="pricing_btn"):
-#             st.session_state.page = "pricing"
-#             st.rerun()
-            
-#     with col4:
-#         if st.button("👩‍🍼\n돌보미 목록", key="caregivers_btn"):
-#             st.session_state.page = "caregivers"
-#             st.rerun()            
-########################################*
-
-
-
-
-
-##################################################
-##################################################
-# # ───────────────────────────────────────────────────
-# # 돌보미 전용 홈 페이지
-# # ───────────────────────────────────────────────────
-# def page_caregiver_home():
-#     # 1) 로그인 확인
-#     if not st.session_state.get("logged_in"):
-#         st.warning("로그인이 필요합니다.")
-#         st.session_state.page = "start"
-#         st.rerun()
-
-#     # 2) 사용자 이름
-#     if "user_name" not in st.session_state:
-#         st.session_state.user_name = "사용자"
-#     user_name = st.session_state.user_name
-
-#     # 3) 환영 메시지
-#     st.markdown(f"""
-#     <h3 style="text-align: center;">　환영해요, <strong>{user_name}</strong> 돌보미님.</h3>
-#     <p style="text-align: center;">무엇을 해보실까요?</p>
-#     """, unsafe_allow_html=True)
-
-#     # 4) CSS (기존 그대로)
-#     st.markdown("""
-#         <style>
-#         .block-container {
-#             min-height: 100vh;
-#             display: flex;
-#             flex-direction: column;
-#             justify-content: center;
-#             align-items: center;
-#         }
-#         .stButton > button {
-#             display: flex;
-#             flex-direction: column;
-#             justify-content: center;
-#             align-items: center;
-#             width: 100%;
-#             height: 120px;
-#             padding: 10px;
-#             font-size: 40px;
-#             font-weight: bold;
-#             text-align: center;
-#             background: white;
-#             border: 3px solid #7993c1;
-#             border-radius: 25px;
-#             color: #2c3e50;
-#             cursor: pointer;
-#             transition: all 0.3s ease-in-out;
-#             box-shadow: 2px 2px 8px rgba(0, 0, 0, 0.1);
-#             white-space: pre-line;
-#         }
-#         .stButton > button:hover {
-#             background: #7993c1;
-#             color: white;
-#             box-shadow: 2px 2px 10px rgba(74, 111, 165, 0.5);
-#         }
-#         .stButton > button:active {
-#             background: #7993c1;
-#             color: white;
-#             box-shadow: 2px 2px 10px rgba(74, 111, 165, 0.8);
-#         }
-#         </style>
-#     """, unsafe_allow_html=True)
-
-#     # 5) 버튼 4개 배치 (키만 바꿔서 충돌 방지)
-#     col1, col2, col3, col4 = st.columns(4)
-#     with col1:
-#         if st.button("✮⋆\n정보용2\n.", key="care_chat_btn"):
-#             st.session_state.page = "chat"; st.rerun()
-#     with col2:
-#         if st.button("🎯\n성향분석2\n.", key="care_recommend_btn"):
-#             st.session_state.page = "recommend"; st.rerun()
-#     with col3:
-#         if st.button("📊\n요금\n산정2", key="care_pricing_btn"):
-#             st.session_state.page = "pricing"; st.rerun()
-#     with col4:
-#         if st.button("👩‍🍼\n돌보미 목록2", key="care_list_btn"):
-#             st.session_state.page = "caregivers"; st.rerun()
-
-
-# # ───────────────────────────────────────────────────
-# # 부모(고객) 전용 홈 페이지
-# # ───────────────────────────────────────────────────
-# def page_parent_home():
-#     # 1) 로그인 확인
-#     if not st.session_state.get("logged_in"):
-#         st.warning("로그인이 필요합니다.")
-#         st.session_state.page = "start"
-#         st.rerun()
-
-#     # 2) 사용자 이름
-#     if "user_name" not in st.session_state:
-#         st.session_state.user_name = "사용자"
-#     user_name = st.session_state.user_name
-
-#     # 3) 환영 메시지
-#     st.markdown(f"""
-#     <h3 style="text-align: center;">　환영해요, <strong>{user_name}</strong> 부모님.</h3>
-#     <p style="text-align: center;">무엇을 해보실까요?</p>
-#     """, unsafe_allow_html=True)
-
-#     # 4) CSS (기존 그대로)
-#     st.markdown("""
-#         <style>
-#         .block-container {
-#             min-height: 100vh;
-#             display: flex;
-#             flex-direction: column;
-#             justify-content: center;
-#             align-items: center;
-#         }
-#         .stButton > button {
-#             display: flex;
-#             flex-direction: column;
-#             justify-content: center;
-#             align-items: center;
-#             width: 100%;
-#             height: 120px;
-#             padding: 10px;
-#             font-size: 40px;
-#             font-weight: bold;
-#             text-align: center;
-#             background: white;
-#             border: 3px solid #7993c1;
-#             border-radius: 25px;
-#             color: #2c3e50;
-#             cursor: pointer;
-#             transition: all 0.3s ease-in-out;
-#             box-shadow: 2px 2px 8px rgba(0, 0, 0, 0.1);
-#             white-space: pre-line;
-#         }
-#         .stButton > button:hover {
-#             background: #7993c1;
-#             color: white;
-#             box-shadow: 2px 2px 10px rgba(74, 111, 165, 0.5);
-#         }
-#         .stButton > button:active {
-#             background: #7993c1;
-#             color: white;
-#             box-shadow: 2px 2px 10px rgba(74, 111, 165, 0.8);
-#         }
-#         </style>
-#     """, unsafe_allow_html=True)
-
-#     # 5) 버튼 4개 배치
-#     col1, col2, col3, col4 = st.columns(4)
-#     with col1:
-#         if st.button("✮⋆\n정보용1\n.", key="parent_chat_btn"):
-#             st.session_state.page = "chat"; st.rerun()
-#     with col2:
-#         if st.button("🎯\n추천용1\n.", key="parent_recommend_btn"):
-#             st.session_state.page = "recommend"; st.rerun()
-#     with col3:
-#         if st.button("📊\n요금\n산정1", key="parent_pricing_btn"):
-#             st.session_state.page = "pricing"; st.rerun()
-#     with col4:
-#         if st.button("👩‍🍼\n돌보미 목록1", key="parent_list_btn"):
-#             st.session_state.page = "caregivers"; st.rerun()
-
-# ##################################################
-# ##################################################
-
-
-# ——————————————————————————————————————————————————
-# (1) 전역에 한번만 CSS 추가
-# ——————————————————————————————————————————————————
-# 전역에 한번만 선언한 CSS 수정
-# 2) CSS 스타일
-############################################
-
-
-
-# ───────────────────────────────────────────────────
-# # 돌보미 전용 홈 페이지
-# # ───────────────────────────────────────────────────
-# def page_caregiver_home():
-#     # 1) 로그인 확인
-#     if not st.session_state.get("logged_in"):
-#         st.warning("로그인이 필요합니다.")
-#         st.session_state.page = "start"
-#         st.rerun()
-
-#     # 2) 사용자 이름
-#     user_name = st.session_state.get("user_name", "사용자")
-
-#     # 3) 상단: 환영 메시지
-#     st.markdown(
-#         f"<h3 style='text-align: left;'>환영해요, <strong>{user_name}</strong> 돌보미님.</h3>",
-#         unsafe_allow_html=True
-#     )
-
-#     # 4) 기존 CSS 유지
-#     st.markdown("""
-#         <style>
-#         .block-container {
-#             min-height: 100vh; display:flex; flex-direction:column;
-#             justify-content:center; align-items:center;
-#         }
-#         .stButton > button {
-#             display:flex; flex-direction:column; justify-content:center;
-#             align-items:center; width:100%; height:120px; padding:10px;
-#             font-size:40px; font-weight:bold; text-align:center;
-#             background:white; border:3px solid #7993c1; border-radius:25px;
-#             color:#2c3e50; cursor:pointer; transition:all .3s ease-in-out;
-#             box-shadow:2px 2px 8px rgba(0,0,0,0.1); white-space:pre-line;
-#         }
-#         .stButton > button:hover {
-#             background:#7993c1; color:white;
-#             box-shadow:2px 2px 10px rgba(74,111,165,0.5);
-#         }
-#         .stButton > button:active {
-#             background:#7993c1; color:white;
-#             box-shadow:2px 2px 10px rgba(74,111,165,0.8);
-#         }
-#         </style>
-#     """, unsafe_allow_html=True)
-
-#     # 5) 메뉴 버튼 + 조건 설정
-#     cols = st.columns(5)
-#     if cols[0].button("정보용", key="care_info"):
-#         st.session_state.page = "chat"; st.rerun()
-#     if cols[1].button("성향분석", key="care_recommend"):
-#         st.session_state.page = "recommend"; st.rerun()
-#     if cols[2].button("요금산정", key="care_pricing"):
-#         st.session_state.page = "pricing"; st.rerun()
-#     if cols[3].button("돌보미목록", key="care_list"):
-#         st.session_state.page = "caregivers"; st.rerun()
-#     if cols[4].button("조건설정", key="care_settings"):
-#         st.session_state.page = "caregiver_settings"; st.rerun()
-
-#     # 6) 하단 고정 로그아웃 버튼
-#     st.markdown('<div class="bottom-logout">', unsafe_allow_html=True)
-#     if st.button("로그아웃", key="logout_bottom"):
-#         for k in ["logged_in","user_email","user_role","user_name"]:
-#             st.session_state.pop(k, None)
-#         st.session_state.page = "start"
-#         st.rerun()
-#     st.markdown('</div>', unsafe_allow_html=True)
-
-
-# # ───────────────────────────────────────────────────
-# # 부모(고객) 전용 홈 페이지
-# # ───────────────────────────────────────────────────
-# def page_parent_home():
-#     # 1) 로그인 확인
-#     if not st.session_state.get("logged_in"):
-#         st.warning("로그인이 필요합니다.")
-#         st.session_state.page = "start"
-#         st.rerun()
-
-#     # 2) 사용자 이름
-#     user_name = st.session_state.get("user_name", "사용자")
-
-#     # 3) 상단: 환영 메시지
-#     st.markdown(
-#         f"<h3 style='text-align: left;'>환영해요, <strong>{user_name}</strong> 부모님.</h3>",
-#         unsafe_allow_html=True
-#     )
-
-#     # 4) CSS (기존 그대로)
-#     st.markdown("""
-#         <style>
-#         .block-container {
-#             min-height: 100vh; display:flex; flex-direction:column;
-#             justify-content:center; align-items:center;
-#         }
-#         .stButton > button {
-#             display:flex; flex-direction:column; justify-content:center;
-#             align-items:center; width:100%; height:120px; padding:10px;
-#             font-size:40px; font-weight:bold; text-align:center;
-#             background:white; border:3px solid #7993c1; border-radius:25px;
-#             color:#2c3e50; cursor:pointer; transition:all .3s ease-in-out;
-#             box-shadow:2px 2px 8px rgba(0,0,0,0.1); white-space:pre-line;
-#         }
-#         .stButton > button:hover {
-#             background:#7993c1; color:white;
-#             box-shadow:2px 2px 10px rgba(74,111,165,0.5);
-#         }
-#         .stButton > button:active {
-#             background:#7993c1; color:white;
-#             box-shadow:2px 2px 10px rgba(74,111,165,0.8);
-#         }
-#         </style>
-#     """, unsafe_allow_html=True)
-
-#     # 5) 메뉴 버튼 (조건설정 제외)
-#     cols = st.columns(4)
-#     if cols[0].button("정보용", key="parent_info"):
-#         st.session_state.page = "chat"; st.rerun()
-#     if cols[1].button("추천용", key="parent_recommend"):
-#         st.session_state.page = "recommend"; st.rerun()
-#     if cols[2].button("요금산정", key="parent_pricing"):
-#         st.session_state.page = "pricing"; st.rerun()
-#     if cols[3].button("돌보미목록", key="parent_list"):
-#         st.session_state.page = "caregivers"; st.rerun()
-
-#     # 6) 맨 하단 중앙 로그아웃 버튼
-#     st.markdown('<div class="bottom-logout">', unsafe_allow_html=True)
-#     if st.button("로그아웃", key="logout_bottom"):
-#         for k in ["logged_in","user_email","user_role","user_name"]:
-#             st.session_state.pop(k, None)
-#         st.session_state.page = "start"
-#         st.rerun()
-#     st.markdown('</div>', unsafe_allow_html=True)
-
+ 
 
 def page_caregiver_home():
     # 1) 로그인 확인
@@ -984,7 +554,7 @@ def page_caregiver_home():
     if row1[1].button("정보용"):
         st.session_state.page = "chat"; st.rerun()
     if row1[2].button("성향분석"):
-        st.session_state.page = "recommend"; st.rerun()
+        st.session_state.page = "caregiver_personality"; st.rerun()
     if row1[3].button("요금산정"):
         st.session_state.page = "pricing"; st.rerun()
 
@@ -993,7 +563,7 @@ def page_caregiver_home():
     if row2[1].button("돌보미목록"):
         st.session_state.page = "caregivers"; st.rerun()
     if row2[3].button("조건설정"):
-        st.session_state.page = "caregiver_settings"; st.rerun()
+        st.session_state.page = "caregiver_conditions"; st.rerun()
 
     st.markdown('</div>', unsafe_allow_html=True)
 
@@ -1233,237 +803,7 @@ def page_pricing():
 ########################################
 
 
-
-########################################
-# def page_chat_counseling():
-#
-
-def page_chat_counseling():
-    import requests
-
-    cat = st.session_state.selected_category or "고민"
-
-    # ───────────────────────────────────────────────────
-    # 1) 상태 초기화
-    # ───────────────────────────────────────────────────
-    if "last_input" not in st.session_state:
-        st.session_state.last_input = None
-    if "waiting_for_response" not in st.session_state:
-        st.session_state.waiting_for_response = False
-    if "counseling_done" not in st.session_state:
-        st.session_state.counseling_done = False
-    if "recommendations" not in st.session_state:
-        st.session_state.recommendations = []
-    if "current_emotion" not in st.session_state:
-        st.session_state.current_emotion = {"joy":0,"positive":0,"surprise":0,"anger":0,"sadness":0,"fear":0}
-    if "emotion_history" not in st.session_state:
-        st.session_state.emotion_history = []
-
-    # ───────────────────────────────────────────────────
-    # 2) CSS & 헤더 (기존 그대로)
-    # ───────────────────────────────────────────────────
-    st.markdown("""
-    <style>
-    @import url('https://fonts.googleapis.com/css?family=Poppins:300,400,600&display=swap');
-
-    * {
-      font-family: 'Poppins', sans-serif;
-    }
-    body {
-      background: linear-gradient(135deg, #dbeeff 25%, #ffffff 100%) no-repeat center center fixed;
-      background-size: cover;
-    }
-    .block-container {
-      background-color: rgba(255, 255, 255, 0.85);
-      backdrop-filter: blur(10px);
-      padding: 2rem;
-      border-radius: 12px;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-    }
-    .user-bubble {
-      text-align: left;
-      background-color: #cceeff;
-      padding: 10px;
-      border-radius: 10px;
-      margin-bottom: 10px;
-      max-width: 70%;
-      margin-left: auto;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.15);
-    }
-    .assistant-bubble {
-      text-align: left;
-      background-color: #ffffff;
-      padding: 10px;
-      border-radius: 10px;
-      margin-bottom: 10px;
-      max-width: 70%;
-      margin-right: auto;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-    }
-    .chat-container {
-      width: 90%;
-      max-width: 600px;
-      height: 70vh;
-      display: flex;
-      flex-direction: column-reverse;
-      overflow-y: auto;
-      padding: 15px;
-      background: white;
-      margin: auto;
-      border-radius: 15px;
-      box-shadow: 0 4px 10px rgba(0,0,0,0.1);
-      position: relative;
-    }
-    .loading-bubble {
-      background: #fff2c7;
-      padding: 12px;
-      border-radius: 20px;
-      margin: 5px 0;
-      max-width: 70%;
-      margin-right: auto;
-      text-align: left;
-      box-shadow: 2px 2px 6px rgba(0,0,0,0.1);
-      font-weight: bold;
-    }
-    </style>
-    """, unsafe_allow_html=True)
-
-    col1, col2, col3 = st.columns([1, 5, 1])
-    with col1:
-        if st.button("◀", key="back_btn"):
-            st.session_state.page = "home"
-            st.rerun()
-    with col2:
-        user_name = st.session_state.get("user_name", "사용자")
-        st.markdown(
-            f"<h3 style='text-align: center;'>🤓 {user_name}님, 고민을 알려주세요</h3>",
-            unsafe_allow_html=True
-        )
-    with col3:
-        if st.button("🏠", key="home_btn"):
-            st.session_state.page = "home"
-            st.rerun()
-
-    # ───────────────────────────────────────────────────
-    # 3) 감정 기반 공감 배너
-    # ───────────────────────────────────────────────────
-    emo = st.session_state.current_emotion
-    if emo.get("sadness", 0) > 0.5:
-        st.warning("요즘 마음이 슬퍼 보이시네요. 편하게 이야기해 주세요. 🧸")
-    elif emo.get("joy", 0) > 0.5:
-        st.success("기분이 좋아 보이시네요! 어떤 이야기를 나눠볼까요? 😊")
-
-    # ───────────────────────────────────────────────────
-    # 4) 메시지 렌더링 (기존 그대로)
-    # ───────────────────────────────────────────────────
-    messages_html = '<div class="chat-container" id="chat-messages">'
-    if st.session_state.waiting_for_response:
-        messages_html += '<div class="loading-bubble">🐝 답변 생성 중...</div>'
-    for msg in st.session_state.counseling_messages:
-        cls = "user-bubble" if msg["role"] == "user" else "assistant-bubble"
-        tag = "Q:" if msg["role"] == "user" else "A:"
-        messages_html += f'<div class="{cls}"><strong>{tag}</strong> {msg["content"]}</div>'
-    messages_html += '<div id="chat-end"></div></div>'
-    messages_html += """
-    <script>
-        document.getElementById('chat-end')?.scrollIntoView({ behavior: 'smooth' });
-    </script>
-    """
-    st.markdown(messages_html, unsafe_allow_html=True)
-
-    # ───────────────────────────────────────────────────
-    # 5) 사용자 입력 + 감정 콜
-    # ───────────────────────────────────────────────────
-    user_q = st.text_input("질문을 입력하세요!", key="chat_input", label_visibility="collapsed")
-    if user_q and user_q != st.session_state.last_input:
-        st.session_state.counseling_messages.append({"role": "user", "content": user_q})
-        st.session_state.last_input = user_q
-        st.session_state.waiting_for_response = True
-
-        # ➡️ /emotion/ 호출
-        emo = requests.post(
-            "http://localhost:8005/emotion/",
-            json={"prompt": user_q, "category": "general_chat"}
-        ).json().get("scores", {})
-        st.session_state.current_emotion = emo
-        # 슬픔 추이 저장
-        hist = st.session_state.emotion_history + [emo.get("sadness", 0)]
-        st.session_state.emotion_history = hist[-10:]
-        st.rerun()
-
-    # ───────────────────────────────────────────────────
-    # 6) LLM 응답 생성 (감정 힌트 포함)
-    # ───────────────────────────────────────────────────
-    if st.session_state.waiting_for_response:
-        with st.spinner("🐝 답변 생성 중..."):
-            lead = ""
-            if emo.get("sadness", 0) > 0.5:
-                lead = "[기분: 슬픔↑] "
-            elif emo.get("anger", 0) > 0.5:
-                lead = "[기분: 분노↑] "
-            cat_clean = cat.replace("🏠 ","") \
-                           .replace("💼 ","") \
-                           .replace("💰 ","") \
-                           .replace("🛡️ ","") \
-                           .replace("📱 ","") \
-                           .replace("🆘 ","")
-            payload = {"prompt": lead + user_q, "category": cat_clean}
-            try:
-                resp = requests.post(RAG_API_URL, json=payload)
-                resp.raise_for_status()
-                answer = resp.json().get("answer", "🚨 응답 없음.")
-            except Exception as e:
-                answer = f"오류 발생: {e}"
-        st.session_state.counseling_messages.append({"role": "assistant", "content": answer})
-        st.session_state.waiting_for_response = False
-        st.rerun()
-
-    # ───────────────────────────────────────────────────
-    # 7) 슬픔 추이 차트
-    # ───────────────────────────────────────────────────
-    st.markdown("**😢 슬픔 추이 (최근 10회)**")
-    st.line_chart(st.session_state.emotion_history)
-
-    # ───────────────────────────────────────────────────
-    # 8) 자동 성향 저장 + 추천 기능 (감정 가중치 포함)
-    # ───────────────────────────────────────────────────
-    user_messages = [m["content"] for m in st.session_state.counseling_messages if m["role"] == "user"]
-    if len(user_messages) >= 5 and not st.session_state.counseling_done:
-        try:
-            user_email = st.session_state.user_email
-            with st.spinner("👀 부모님의 성향을 분석하고 돌보미를 추천 중입니다..."):
-                # 성향 분석
-                pref_resp = requests.post(
-                    "http://localhost:8005/user/preference/from-chat",
-                    json={"email": user_email, "history": user_messages}
-                )
-                pref_resp.raise_for_status()
-                # 돌보미 추천 (감정 포함)
-                rec_resp = requests.post(
-                    "http://localhost:8005/recommend/caregiver",
-                    json={"email": user_email, "emotion": st.session_state.current_emotion}
-                )
-                rec_resp.raise_for_status()
-                st.session_state.recommendations = rec_resp.json().get("recommendations", [])
-                st.session_state.counseling_done = True
-        except Exception as e:
-            st.session_state.counseling_done = True
-            st.error(f"🔴 추천 실패: {type(e).__name__} - {e}")
-
-    # ───────────────────────────────────────────────────
-    # 9) 추천 돌보미 출력 (기존 그대로)
-    # ───────────────────────────────────────────────────
-    if st.session_state.recommendations:
-        st.markdown("---")
-        st.subheader("🧡 추천 돌보미 Top 3")
-        for r in st.session_state.recommendations:
-            st.markdown(f"""
-**👩‍🍼 {r['name']}** (나이: {r['age']}세)  
-📝 {r['personality']}  
-💡 유사도: **{r['similarity']*100:.2f}%**
-""")
-
-
+ 
 
 
 ########################################
@@ -1698,115 +1038,81 @@ def page_recommend_result():
 
 ########################################
 def page_chat_talk():
-    # ✅ 상태 변수 설정
-    if "chat_messages" not in st.session_state:
-        st.session_state.chat_messages = []  # 수다 대화 상태 변수 추가
+    import requests
+
+    # 1) 챗봇 초기 메시지 자동 삽입 (처음 입장 시)
+    if "chat_messages" not in st.session_state or len(st.session_state.chat_messages) == 0:
+        st.session_state.chat_messages = [{
+            "role": "assistant",
+            "content": (
+                "안녕하세요! 궁금한 점이나 도움이 필요하신 내용을 편하게 말씀해 주세요. "
+                "육아, 돌봄 서비스, 관련 정책 등 다양한 정보를 안내해 드릴게요."
+            )
+        }]
+
+    # 2) 상태 변수 초기화
     if "last_chat_input" not in st.session_state:
-        st.session_state.last_chat_input = None  
+        st.session_state.last_chat_input = None
     if "waiting_for_chat_response" not in st.session_state:
         st.session_state.waiting_for_chat_response = False
 
-    # ✅ **CSS 스타일 수정 (입력창을 채팅창 내부에 완전히 포함)**
+    # 3) CSS 스타일 (기존과 동일)
     st.markdown("""
     <style>
+    .stButton > button {
+        padding: 0.25rem 0.75rem !important;
+        font-size: 0.9rem !important;
+    }
     .chat-container {
-      width: 90%;
-      max-width: 600px;
-      height: 75vh;
-      display: flex;
-      flex-direction: column-reverse;
-      overflow-y: auto;
-      padding: 15px;
-      background: white;
-      margin: auto;
-      border-radius: 15px;
-      box-shadow: 0px 4px 10px rgba(0, 0, 0, 0.1);
-      position: relative;
+        width: 90%;
+        max-width: 600px;
+        height: 70vh;
+        display: flex;
+        flex-direction: column;
+        overflow-y: auto;
+        padding: 15px;
+        background: white;
+        margin: auto;
+        border-radius: 15px;
+        box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+        position: relative;
     }
-
-    .chat-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      width: 100%;
-      background: #ffcc66;
-      color: white;
-      padding: 12px 16px;
-      font-size: 18px;
-      font-weight: bold;
-      border-bottom: 2px solid #ffb347;
-      border-radius: 8px 8px 0 0;
-    }
-
-    .chat-header h3 {
-      flex-grow: 1;
-      text-align: center;
-      margin: 0;
-    }
-
     .user-bubble {
-      background: #d0f0ff;
-      padding: 12px;
-      border-radius: 20px;
-      margin: 5px 0;
-      max-width: 70%;
-      margin-left: auto;
-      text-align: left;
-      box-shadow: 2px 2px 6px rgba(0, 0, 0, 0.1);
+        background: #d0f0ff;
+        padding: 12px;
+        border-radius: 20px;
+        margin: 5px 0;
+        max-width: 70%;
+        margin-left: auto;
+        text-align: left;
+        box-shadow: 2px 2px 6px rgba(0,0,0,0.1);
     }
-
     .assistant-bubble {
-      background: #ffeb99;
-      padding: 12px;
-      border-radius: 20px;
-      margin: 5px 0;
-      max-width: 70%;
-      margin-right: auto;
-      text-align: left;
-      box-shadow: 2px 2px 6px rgba(0, 0, 0, 0.1);
+        background: #ffeb99;
+        padding: 12px;
+        border-radius: 20px;
+        margin: 5px 0;
+        max-width: 70%;
+        margin-right: auto;
+        text-align: left;
+        box-shadow: 2px 2px 6px rgba(0,0,0,0.1);
     }
-
     .loading-bubble {
-      background: #fff2c7;
-      padding: 12px;
-      border-radius: 20px;
-      margin: 5px 0;
-      max-width: 70%;
-      margin-right: auto;
-      text-align: left;
-      box-shadow: 2px 2px 6px rgba(0, 0, 0, 0.1);
-      font-weight: bold;
+        background: #fff2c7;
+        padding: 12px;
+        border-radius: 20px;
+        margin: 5px 0;
+        max-width: 70%;
+        margin-left: 0; /* 왼쪽 정렬 */
+        text-align: left;
+        font-weight: bold;
+        box-shadow: 2px 2px 6px rgba(0,0,0,0.1);
     }
-
-    /* ✅ 입력창을 채팅창 내부 최하단에 고정 */
-    .input-container {
-      width: calc(100% - 30px);
-      padding: 10px;
-      background: white;
-      border-top: 2px solid #ccc;
-      display: flex;
-      align-items: center;
-      position: absolute;
-      bottom: 0;
-      left: 15px;
-      border-radius: 0 0 15px 15px;
-      box-shadow: 0px -2px 8px rgba(0, 0, 0, 0.1);
-    }
-
-    .input-container input {
-      width: 100%;
-      padding: 10px;
-      border: none;
-      outline: none;
-      font-size: 16px;
-      border-radius: 10px;
-      background: #f1f3f4;
-    }
-    
     </style>
     """, unsafe_allow_html=True)
+    
 
-    # ✅ **상단 타이틀 바**
+    # 4) 상단 타이틀 및 네비게이션 버튼
     col1, col2, col3 = st.columns([1, 5, 1])
     with col1:
         if st.button("◀", key="back_chat_btn"):
@@ -1814,22 +1120,19 @@ def page_chat_talk():
             st.rerun()
 
     with col2:
-        st.markdown(f"<h3 style='text-align: center;'> 정보의 바다!</h3>", unsafe_allow_html=True)
+        st.markdown("<h3 style='text-align: center;'> 정보 안내 챗봇</h3>", unsafe_allow_html=True)
 
     with col3:
         if st.button("🏠", key="home_chat_btn"):
             st.session_state.page = "home"
             st.rerun()
 
-    # ✅ **채팅 메시지 컨테이너 (입력창 포함)**
+    # 5) 채팅 메시지 렌더링 (역순으로 표시)
     messages_html = '<div class="chat-container" id="chat-messages">'
-
-    # ✅ "🐝 답변 생성 중..."을 조건부로 표시
     if st.session_state.waiting_for_chat_response:
-        messages_html += '<div class="loading-bubble">🐝 답변 생성 중...</div>'
+        messages_html += '<div class="loading-bubble">답변 생성 중...</div>'
 
-    # ✅ 기존 메시지 렌더링
-    for msg in reversed(st.session_state.chat_messages):
+    for msg in st.session_state.chat_messages:
         if msg["role"] == "user":
             messages_html += f'<div class="user-bubble"><strong>Q:</strong> {msg["content"]}</div>'
         else:
@@ -1838,39 +1141,40 @@ def page_chat_talk():
     messages_html += '</div>'
     st.markdown(messages_html, unsafe_allow_html=True)
 
-    # ✅ **입력창을 채팅창 내부 최하단에 고정 (단일 입력창 유지)**
-    user_q = st.text_input(
-        "자유롭게 수다를 떨어보세요!", 
-        key="chat_input", 
-        label_visibility="collapsed"
+    # 6) 입력창 및 입력 처리 함수
+    def _on_chat_enter():
+        ui = st.session_state.chat_input
+        if not ui or ui == st.session_state.last_chat_input:
+            return
+        st.session_state.chat_messages.append({"role": "user", "content": ui})
+        st.session_state.last_chat_input = ui
+        st.session_state.waiting_for_chat_response = True
+        st.session_state.chat_input = ""  # 입력창 비우기
+
+    st.text_input(
+        "궁금한 내용을 입력해 주세요.",
+        key="chat_input",
+        label_visibility="collapsed",
+        on_change=_on_chat_enter
     )
 
-    # ✅ **질문 입력 처리**
-    if user_q and user_q != st.session_state.last_chat_input:
-        st.session_state.chat_messages.append({"role": "user", "content": user_q})
-        st.session_state.waiting_for_chat_response = True
-        st.session_state.last_chat_input = user_q
-        st.rerun()
-
-    # ✅ **AI 응답 생성 (자동 호출)**
+    # 7) AI 응답 생성 처리
     if st.session_state.waiting_for_chat_response:
-        with st.spinner("🐝 답변 생성 중..."):
+        with st.spinner("답변 생성 중..."):
             try:
                 resp = requests.post(
                     RAG_API_URL,
-                    json={"prompt": st.session_state.chat_messages[-1]["content"], "category": "general_chat"}
+                    json={"prompt": st.session_state.chat_messages[-1]["content"], "category": "info_chat"}
                 )
                 resp.raise_for_status()
                 data = resp.json()
-                answer = data.get("answer", "🚨 응답 없음.")
+                answer = data.get("answer", "죄송합니다, 답변을 드리기 어려워요.")
             except requests.exceptions.RequestException as e:
                 answer = f"오류 발생: {str(e)}"
 
-        # ✅ "답변 생성 중..." 제거 후 실제 응답 추가
         st.session_state.chat_messages.append({"role": "assistant", "content": answer})
         st.session_state.waiting_for_chat_response = False
         st.rerun()
-
 ########################################
 
 
@@ -2066,122 +1370,84 @@ def page_caregiver_list():
 
     except Exception as e:
         st.error(f"❌ 오류 발생: {e}")
-def page_caregiver_settings():
-    # ────────────────────────────────────────────────
-    # 1) 내비게이션 바 (뒤로 / 제목 / 홈)
-    # ────────────────────────────────────────────────
-    col1, col2, col3 = st.columns([1, 5, 1])
+ 
+# ───────────────────────────────────────────────
+# 돌보미 조건 설정 페이지
+# ───────────────────────────────────────────────
+def page_caregiver_conditions():
+    st.subheader("🗓️ 돌보미 조건 설정")
+    st.markdown("돌봄이 가능한 요일, 시간, 조건을 선택해주세요.")
+
+    if "user_email" not in st.session_state:
+        st.error("먼저 로그인해주세요.")
+        return
+
+    # ───── 요일 선택 ─────
+    days = ["월", "화", "수", "목", "금", "토", "일"]
+    selected_days = []
+    select_all = st.checkbox("모든 요일 선택")
+    cols = st.columns(7)
+    for i, day in enumerate(days):
+        if cols[i].checkbox(day, value=select_all, key=f"day_{day}"):
+            selected_days.append(day)
+
+    # ───── 시간대 추가 ─────
+    st.markdown("<h4 style='color: #2c3e50;'>시간대 설정</h4>", unsafe_allow_html=True)
+    if "edit_time_slots" not in st.session_state:
+        st.session_state.edit_time_slots = []
+
+    if st.button("⏰ 시간대 추가"):
+        st.session_state.edit_time_slots.append({"start": 1, "end": 1})
+
+    for i, slot in enumerate(st.session_state.edit_time_slots):
+        col1, col2, col3 = st.columns([2, 2, 1])
+        with col1:
+            slot["start"] = st.selectbox("시작 시간", range(1, 25), index=slot["start"]-1, key=f"start_{i}")
+        with col2:
+            slot["end"] = st.selectbox("종료 시간", range(1, 25), index=slot["end"]-1, key=f"end_{i}")
+        with col3:
+            if st.button("🗑️", key=f"delete_{i}"):
+                st.session_state.edit_time_slots.pop(i)
+                st.rerun()
+
+    # ───── 특수아동 여부 ─────
+    st.markdown("<h4 style='color: #2c3e50;'>특수아동 수용 여부</h4>", unsafe_allow_html=True)
+    special_child = st.radio("", ["O", "X"], horizontal=True)
+
+    # ───── 연령대 설정 ─────
+    st.markdown("<h4 style='color: #2c3e50;'>수용 가능 연령대</h4>", unsafe_allow_html=True)
+    age_range = st.slider("연령 범위 (단위: 세)", 0.25, 12.0, (1.0, 10.0), step=0.25, format="%.2f")
+    col1, col2 = st.columns([5, 1])
     with col1:
-        if st.button("◀", key="back_to_home_from_settings"):
-            st.session_state.page = "home"
+        if st.button("돌아가기"):
+            st.session_state.page = "start"  # 홈 화면을 표시하도록 페이지 상태 변경
             st.rerun()
+
     with col2:
-        st.markdown("<h3 style='text-align: center;'>⚙️ 조건 설정</h3>", unsafe_allow_html=True)
-    with col3:
-        if st.button("🏠", key="home_from_settings"):
-            st.session_state.page = "home"
-            st.rerun()
+        # ───── 저장 버튼 ─────
+        if st.button("저장"):
+            if not selected_days:
+                st.warning("하나 이상의 요일을 선택해주세요.")
+                st.stop()
+            if not st.session_state.edit_time_slots:
+                st.warning("하나 이상의 시간대를 추가해주세요.")
+                st.stop()
 
-    # ────────────────────────────────────────────────
-    # 2) 페이지 전용 CSS (컨테이너 꽉 채우기 + 폼 간격)
-    # ────────────────────────────────────────────────
-    st.markdown("""
-    <style>
-      .block-container {
-        min-height: 100vh !important;
-        display: flex;
-        flex-direction: column;
-        padding-top: 2rem;
-      }
-      /* 폼 요소 간격 */
-      .stForm > div {
-        margin-bottom: 1.5rem !important;
-      }
-      /* 제출 버튼 가로 너비 */
-      .stForm button[type="submit"] > button {
-        width: 100% !important;
-        padding: 0.75rem 0 !important;
-        font-size: 1rem !important;
-      }
-    </style>
-    """, unsafe_allow_html=True)
+            update_payload = {
+                "email": st.session_state.user_email,
+                "available_days": selected_days,
+                "available_times": st.session_state.edit_time_slots,
+                "special_child": special_child == "O",
+                "age_min": age_range[0],
+                "age_max": age_range[1]
+            }
+            try:
+                res = requests.post("http://localhost:8005/caregiver/update-conditions", json=update_payload)
+                res.raise_for_status()
+                st.success("조건이 성공적으로 저장되었습니다.")
+            except requests.exceptions.RequestException as e:
+                st.error(f"저장 실패: {e}")
 
-    # ────────────────────────────────────────────────
-    # 3) 조건 입력 폼
-    # ────────────────────────────────────────────────
-    with st.form("caregiver_settings_form"):
-        # (1) 돌봄 가능 연령 필터
-        age_options = ["0~2세", "3~5세", "6세 이상", "전 연령"]
-        st.multiselect(
-            "돌봄 가능 연령 선택",
-            options=age_options,
-            default=st.session_state.get("filter_age", ["전 연령"]),
-            key="filter_age"
-        )
-
-        # (2) 활동 가능 요일 필터
-        day_options = ["월", "화", "수", "목", "금", "토", "일"]
-        st.multiselect(
-            "활동 가능 요일 선택",
-            options=day_options,
-            default=st.session_state.get("filter_days", day_options),
-            key="filter_days"
-        )
-
-        # (3) 최대 1시간당 요금 필터 (단위는 레이블에 넣기)
-        st.number_input(
-            "최대 1시간당 요금 (원)",
-            min_value=0,
-            step=1000,
-            value=st.session_state.get("filter_max_rate", 0),
-            key="filter_max_rate",
-            format="%d"  # 숫자만 포맷
-        )
-
-        # (4) 저장 버튼 — 반드시 폼 안에 있어야 합니다!
-        submitted = st.form_submit_button("저장")
-
-    # ────────────────────────────────────────────────
-    # 4) 저장 후 처리
-    # ────────────────────────────────────────────────
-    if submitted:
-        st.success("✅ 조건이 저장되었습니다.")
-        # 저장된 조건을 다음 조회에 사용하도록 바로 돌보미 목록으로 이동
-        st.session_state.page = "home"
-        st.rerun()
-        
-########################################
-
-# 5) 라우팅 (맛집 챗봇 반영)
-# ########################################
-# if st.session_state.logged_in and st.session_state.page == "start":
-#     st.session_state.page = "home"
-#     st.rerun()
-    
-# page = st.session_state.page
-
-# if page == "start":
-#     page_start()
-    
-# elif page == "home":
-#     if st.session_state.user_role == "돌보미":
-#         page_caregiver_home()
-#     else:
-#         page_parent_home()
-        
-# elif page == "recommend":
-#     page_recommend_service()
-# elif page == "recommend_result":
-#     page_recommend_result()
-# elif page == "chat":
-#     page_chat_talk()
-# elif page == "pricing":
-#     page_pricing()
-# elif page == "fee_result":
-#     page_fee_result()
-# elif page == "caregivers":
-#     page_caregiver_list()
-# #######################################
 
 
 # 자동 로그인 후 시작 페이지에서 바로 home으로
@@ -2216,12 +1482,13 @@ elif page == "pricing":
 elif page == "fee_result":
     page_fee_result()
 
+elif page == "caregiver_conditions":
+    page_caregiver_conditions()
+
 elif page == "caregivers":
     page_caregiver_list()
+    
 elif page=="caregiver_personality":
     page_caregiver_personality()
-    
-elif page == "caregiver_settings":
-    page_caregiver_settings()
 
 # 더 만들 페이지가 생기면 여기 아래에 elif 로 추가
