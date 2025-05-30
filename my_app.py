@@ -1,3 +1,7 @@
+from datetime import datetime
+import altair as alt
+import json
+import pandas as pd
 import streamlit as st
 import requests
 from streamlit_lottie import st_lottie
@@ -1139,30 +1143,17 @@ import math
 import re
 
 # 요일 구간을 실제 요일 리스트로 변환하는 함수
-def expand_days(availability_text):
-    day_order = ['월', '화', '수', '목', '금', '토', '일']
-    days = set()
+def expand_days(text: str):
+    order = ["월", "화", "수", "목", "금", "토", "일"]
+    s = set(); t = (text or "").replace(" ", "")
+    if "주말" in t: s |= {"토", "일"}
+    for a, b in re.findall(r"([월화수목금토일])~([월화수목금토일])", t):
+        i, j = order.index(a), order.index(b)
+        s |= set(order[i:j + 1] if i <= j else order[i:] + order[:j + 1])
+    for d in order:
+        if d in t: s.add(d)
+    return s
 
-    # '주말' 포함 처리
-    if '주말' in availability_text:
-        days.update(['토', '일'])
-
-    # '화~토' 같은 범위 처리
-    matches = re.findall(r'([월화수목금토일])\~([월화수목금토일])', availability_text)
-    for start, end in matches:
-        si = day_order.index(start)
-        ei = day_order.index(end)
-        if si <= ei:
-            days.update(day_order[si:ei+1])
-        else:
-            days.update(day_order[si:] + day_order[:ei+1])
-
-    # 개별 요일 포함도 추가
-    for d in day_order:
-        if d in availability_text:
-            days.add(d)
-
-    return days
 def page_fee_result():
     """💵 요금 계산 결과 (fee.py 알고리즘 반영)"""
     inputs = st.session_state.get("fee_inputs")
@@ -1219,6 +1210,15 @@ def page_fee_result():
     if st.button("처음으로 돌아가기"):
         st.session_state.page = "home"
         st.rerun()
+        
+def format_age(age_float: float) -> str:
+    yrs = int(age_float)
+    mons = round((age_float - yrs) * 12)
+    if mons == 12:
+        yrs += 1; mons = 0
+    return f"{yrs}세 {mons}개월" if mons else f"{yrs}세"
+
+
 def page_caregiver_list():
 
     # 사용자 목록 불러오기
