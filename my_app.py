@@ -674,7 +674,7 @@ def page_parent_home():
     # ── 메뉴 버튼 (4개)
     c1, c2, c3, c4 = st.columns(4)
     if c1.button("✮\n정보용"):      st.session_state.page="chat";       st.rerun()
-    if c2.button("🎯\n추천용"):      st.session_state.page="recommend";  st.rerun()
+    if c2.button("🎯\n추천용"):      st.session_state.page="recommend_conditions";  st.rerun()
     if c3.button("📊\n요금산정"):    st.session_state.page="pricing";    st.rerun()
     if c4.button("👩‍🍼\n돌보미목록"):  st.session_state.page="caregivers"; st.rerun()
 
@@ -869,6 +869,7 @@ def page_recommend_service():
     </style>
     """, unsafe_allow_html=True)
 
+    
     # ─────────────────────────────────────────────────────────────────────
     # 3) 네비게이션 바 (기존 그대로)
     # ─────────────────────────────────────────────────────────────────────
@@ -905,7 +906,8 @@ def page_recommend_service():
                             "http://localhost:8005/recommend/caregiver",
                             json={
                                 "history": history,
-                                "vectors": pref_resp.json()["vectors"]
+                                "vectors": pref_resp.json()["vectors"],
+                                "conditions": st.session_state.get("recommend_conditions", {})
                             }
                         )
                         rec_resp.raise_for_status()
@@ -982,67 +984,121 @@ def page_recommend_service():
 ######################################################
 #############################################
 
-def page_recommend_result():
-    st.title("🎯 맞춤 돌보미 추천 결과")
-    
+def page_recommend_result() -> None:
+    st.markdown(
+        "<h1 style='text-align:center;'>맞춤 돌보미 추천 결과</h1>",
+        unsafe_allow_html=True,
+    )
+
     if "recommendation_result" not in st.session_state:
-        st.error("추천 결과가 없습니다. 먼저 추천을 진행해주세요.")
+        st.error("추천 결과가 없습니다. 먼저 추천을 진행해 주세요.")
         if st.button("돌아가기"):
             st.session_state.page = "recommend"
         return
-    
+
     result = st.session_state.recommendation_result
-    
-    # CSS 스타일 추가
-    st.markdown("""
-    <style>
-    .recommendation-card {
-        background: white;
-        border-radius: 15px;
-        padding: 20px;
-        margin: 20px 0;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-    }
-    .recommendation-title {
-        color: #2c3e50;
-        font-size: 24px;
-        margin-bottom: 15px;
-    }
-    .recommendation-score {
-        color: #e74c3c;
-        font-size: 20px;
-        margin-bottom: 15px;
-    }
-    .recommendation-reason {
-        color: #34495e;
-        font-size: 16px;
-        line-height: 1.6;
-    }
-    </style>
-    """, unsafe_allow_html=True)
-    
-    for i, r in enumerate(result["recommendations"], 1):
-        # 전체 유사도 점수 계산
-        total_similarity = sum(r["category_similarities"].values()) / len(r["category_similarities"])
-        
-        # 추천 이유에서 넘버링 제거
-        explanation = re.sub(r'\d+\.\s*', '', r["explanation"])
-        
-        # 카드 형태로 표시
-        st.markdown(f"""
-        <div class="recommendation-card">
-            <div class="recommendation-title">👩‍🍼 {i}순위: {r['name']} ({r['age']}세)</div>
-            <div class="recommendation-score">💯 유사도 점수: {total_similarity:.1%}</div>
-            <div class="recommendation-reason">
-                <strong>💡 추천 이유:</strong><br>
-                {explanation}
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-    
+
+    # ───────── 루프: Top-3 돌보미 ─────────
+    for rank, rec in enumerate(result["recommendations"], start=1):
+
+        # 1) 사진·전화번호·특성값 읽기
+        with sqlite3.connect("users.db", check_same_thread=False) as conn:
+            cur = conn.cursor()
+
+            # 🔹 id, image_url, phone 모두 가져오기
+            cur.execute(
+                "SELECT id, image_url, phone FROM users WHERE username=?",
+                (rec["name"],)
+            )
+            row_u = cur.fetchone()
+            uid, img_url, phone = row_u if row_u else (None, None, "―")
+
+            # 기본 6-항목 딕셔너리
+            traits = dict.fromkeys(
+                ["꼼꼼함", "사교성", "쾌활함", "따뜻함", "긍정성", "관찰력"],
+                0.0
+            )
+
+            if uid is not None:
+                cur.execute(
+                    """
+                    SELECT diligent, sociable, cheerful,
+                           warm, positive, observant,
+                           personality_traits_vector
+                    FROM caregivers WHERE user_id=?
+                    """,
+                    (uid,),
+                )
+                row_c = cur.fetchone()
+
+                if row_c:
+                    d, s, c, w, p, o, vec_json = row_c
+                    col_vals = [d, s, c, w, p, o]
+                    if any(v not in (None, 0) for v in col_vals):
+                        traits.update(
+                            dict(zip(traits.keys(), [v or 0 for v in col_vals]))
+                        )
+                    elif vec_json:  # 컬럼이 비어 있으면 vector 앞 6값
+                        vec = json.loads(vec_json)
+                        traits.update(dict(zip(traits.keys(), vec[:6])))
+
+        # 2) 구분선
+        st.markdown("<hr>", unsafe_allow_html=True)
+
+        # 3) 카드(왼쪽) + 사진(오른쪽)
+        left, right = st.columns([4, 1.5], gap="large")
+
+        with left:
+            sim_pct = rec["total_similarity"] * 100
+            st.markdown(
+                f"""
+                <div style="
+                    border:1px solid #ddd; border-radius:12px;
+                    padding:20px; margin-bottom:5px;
+                    background:#fafafa;">
+                  <p style="font-size:30px; font-weight:600; margin:0 0 4px 0;">
+                    👩‍🍼 {rank}순위&nbsp;&nbsp;{rec['name']} ({rec['age']}세)
+                  </p>
+                  <p style="margin:0 0 6px 0; color:#e74c3c;">
+                    유사도 점수: {sim_pct:.1f}%
+                  </p>
+                  <p style="margin:0 0 8px 0; font-size:15px; color:#555;">
+                    📞 연락처: {phone}
+                  </p>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+        with right:
+            if img_url:
+                st.image(img_url, width=250)
+            else:
+                st.markdown(
+                    "<p style='color:#999; text-align:center;'>사진 없음</p>",
+                    unsafe_allow_html=True,
+                )
+
+        # 4) 추천 이유 본문 (번호 제거)
+        reason_txt = re.sub(r"\d+\.\s*", "", rec["explanation"]).strip()
+        st.markdown(reason_txt)
+
+        # 5) 성격 그래프
+        df = pd.DataFrame(traits.items(), columns=["trait", "score"])
+        chart = (
+            alt.Chart(df)
+            .mark_bar(color="#4C66AF", size=14)   # 하늘색 계열
+            .encode(
+                x=alt.X("score:Q", scale=alt.Scale(domain=[0, 1]),
+                        title="점수 (0~1)"),
+                y=alt.Y("trait:N", sort=list(traits), title="")
+            )
+        )
+        st.altair_chart(chart, use_container_width=True)
+
+    # 6) 다시 추천 버튼
     if st.button("다시 추천하기"):
         st.session_state.page = "recommend"
-
 
 
 
@@ -1127,7 +1183,7 @@ def page_chat_talk():
     
 
     # 4) 상단 타이틀 및 네비게이션 버튼
-    col1, col2, col3 = st.columns([1, 5, 1])
+    col1, col2, col3 = st.columns([1, 10, 1])
     with col1:
         if st.button("◀", key="back_chat_btn"):
             st.session_state.page = "home"
@@ -1652,6 +1708,93 @@ def page_caregiver_conditions():
             except requests.exceptions.RequestException as e:
                 st.error(f"저장 실패: {e}")
 
+def page_recommend_conditions():
+    import streamlit as st
+
+    st.markdown("""
+    <style>
+    .block-container {
+        min-height: 100vh !important;
+        display: flex;
+        flex-direction: column;
+        padding-top: 2rem;
+    }
+    .stButton > button {
+        padding: 0.25rem 0.75rem !important;
+        font-size: 0.9rem !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+    st.subheader("🗓️ 추천을 위한 아이 돌봄 조건 설정")
+    st.markdown("원하는 돌봄 조건을 설정해주세요. 이후 성향 대화를 통해 추천을 도와드릴게요.")
+
+    if "user_email" not in st.session_state:
+        st.error("먼저 로그인해주세요.")
+        return
+
+    # ───── 요일 선택 ─────
+    days = ["월", "화", "수", "목", "금", "토", "일"]
+    selected_days = []
+    select_all = st.checkbox("모든 요일 선택")
+    cols = st.columns(7)
+    for i, day in enumerate(days):
+        if cols[i].checkbox(day, value=select_all, key=f"recommend_day_{day}"):
+            selected_days.append(day)
+
+    # ───── 시간대 추가 ─────
+    st.markdown("#### 시간대 설정")
+    if "recommend_time_slots" not in st.session_state:
+        st.session_state.recommend_time_slots = []
+
+    if st.button("⏰ 시간대 추가"):
+        st.session_state.recommend_time_slots.append({"start": 9, "end": 12})
+
+    for i, slot in enumerate(st.session_state.recommend_time_slots):
+        col1, col2, col3 = st.columns([2, 2, 1])
+        with col1:
+            slot["start"] = st.selectbox("시작", range(1, 25), index=slot["start"]-1, key=f"rec_start_{i}")
+        with col2:
+            slot["end"] = st.selectbox("종료", range(1, 25), index=slot["end"]-1, key=f"rec_end_{i}")
+        with col3:
+            if st.button("🗑️", key=f"rec_delete_{i}"):
+                st.session_state.recommend_time_slots.pop(i)
+                st.rerun()
+
+    # ───── 특수아동 여부 ─────
+    st.markdown("####  특수아동 수용 여부")
+    special_child = st.radio("", ["O", "X"], horizontal=True)
+    # ───── 연령대 설정 ─────
+    st.markdown("####  수용 가능 연령대")
+    age_range = st.slider("연령 범위 (단위: 세)", 0.25, 12.0, (2.0, 7.0), step=0.25, format="%.2f")
+
+    # ───── 저장 및 다음 단계 ─────
+    col1, col2 = st.columns([5, 1])
+    with col1:
+        if st.button("돌아가기"):
+            st.session_state.page = "start"
+            st.rerun()
+
+    with col2:
+        if st.button("다음"):
+            if not selected_days:
+                st.warning("하나 이상의 요일을 선택해주세요.")
+                st.stop()
+            if not st.session_state.recommend_time_slots:
+                st.warning("하나 이상의 시간대를 추가해주세요.")
+                st.stop()
+
+            st.session_state.recommend_conditions = {
+                "available_days": selected_days,
+                "available_times": st.session_state.recommend_time_slots,
+                "special_child_required": special_child,
+                "age_min": age_range[0],
+                "age_max": age_range[1]
+            }
+
+            st.session_state.page = "recommend"  # 다음 페이지로 이동
+            st.rerun()
+
 
 
 # 자동 로그인 후 시작 페이지에서 바로 home으로
@@ -1688,6 +1831,9 @@ elif page == "fee_result":
 
 elif page == "caregiver_conditions":
     page_caregiver_conditions()
+
+elif page=="recommend_conditions":
+    page_recommend_conditions()
 
 elif page == "caregivers":
     page_caregiver_list()
