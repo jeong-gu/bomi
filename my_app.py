@@ -602,26 +602,73 @@ def page_parent_home():
     user_name = st.session_state.get("user_name", "사용자")
 
     # ── 헤더: 로그아웃 버튼 + 환영 메시지
-    st.markdown('<div class="logout-btn">', unsafe_allow_html=True)
-    if st.button("⏻", key="logout_parent"):
-        for k in ["logged_in","user_email","user_role","user_name"]:
-            st.session_state.pop(k, None)
-        st.session_state.page = "start"
-        st.rerun()
-    st.markdown('</div>', unsafe_allow_html=True)
-
-    st.markdown(
-        f"<h3 style='text-align:left;'>환영해요, <strong>{user_name}</strong> 부모님.</h3>",
-        unsafe_allow_html=True
-    )
-
+    
+    # 3) 환영 메시지
+    st.markdown(f"""
+    <h3 style="text-align: center;">환영해요, <strong>{user_name}</strong> 부모님.</h3>
+    <p style="text-align: center;">무엇을 해보실까요?</p>
+    """, unsafe_allow_html=True)
+    
+    # 4) CSS (기존 그대로)
+    st.markdown("""
+        <style>
+        .block-container {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+        }
+        /* 페이지 전체 배경 컨테이너 */
+        .block-container {
+            background-color: rgba(255, 255, 255, 0.85);
+            backdrop-filter: blur(10px);
+            padding: 2rem;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            }
+        .stButton > button {
+            background-color: #7993C1;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            width: 110px;
+            height: 110px;
+            padding: 10px;
+            font-size: 40px;
+            font-weight: bold;
+            text-align: center;
+            background: white;
+            border: 3px solid #7993c1;
+            border-radius: 25px;
+            color: #2c3e50;
+            cursor: pointer;
+            transition: all 0.3s ease-in-out;
+            box-shadow: 2px 2px 8px rgba(0, 0, 0, 0.1);
+            white-space: pre-line;
+        }
+        .stButton > button:hover {
+            background: #7993c1;
+            color: white;
+            box-shadow: 2px 2px 10px rgba(74, 111, 165, 0.5);
+        }
+        .stButton > button:active {
+            background: #7993c1;
+            color: white;
+            box-shadow: 2px 2px 10px rgba(74, 111, 165, 0.8);
+        }
+        </style>
+    """, unsafe_allow_html=True)
+    
     # ── 메뉴 버튼 (4개)
     c1, c2, c3, c4 = st.columns(4)
-    if c1.button("정보용"):      st.session_state.page="chat";       st.rerun()
-    if c2.button("추천용"):      st.session_state.page="recommend";  st.rerun()
-    if c3.button("요금산정"):    st.session_state.page="pricing";    st.rerun()
-    if c4.button("돌보미목록"):  st.session_state.page="caregivers"; st.rerun()
+    if c1.button("✮\n정보용"):      st.session_state.page="chat";       st.rerun()
+    if c2.button("🎯\n추천용"):      st.session_state.page="recommend";  st.rerun()
+    if c3.button("📊\n요금산정"):    st.session_state.page="pricing";    st.rerun()
+    if c4.button("👩‍🍼\n돌보미목록"):  st.session_state.page="caregivers"; st.rerun()
 
+    
 
 
 
