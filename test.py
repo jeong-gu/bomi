@@ -64,7 +64,7 @@ except sqlite3.OperationalError:
 # 기존 돌보미 데이터 삭제
 cur.executescript("""
     DELETE FROM caregivers;
-    DELETE FROM users WHERE role='care';
+    DELETE FROM users;
 """)
 conn.commit()
 
@@ -89,7 +89,7 @@ for i in range(TOTAL):
     cur.execute("""
         INSERT INTO users
           (username, email, hashed_password, role, phone, age, created_at, image_url)
-        VALUES (?, ?, ?, 'care', ?, ?, ?, ?)
+        VALUES (?, ?, ?, '돌보미', ?, ?, ?, ?)
     """, (
         name, email, hash_password("123"),
         phone, age, created, img_url

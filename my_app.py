@@ -756,13 +756,6 @@ def page_recommend_service():
     # ─────────────────────────────────────────────────────────────────────
     st.markdown("""
     <style>
-    .block-container {
-        background-color: rgba(255, 255, 255, 0.85);
-        backdrop-filter: blur(10px);
-        padding: 2rem;
-        border-radius: 12px;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-        }
     .stButton > button {
         padding: 0.25rem 0.75rem !important;
         font-size: 0.9rem !important;
@@ -807,7 +800,7 @@ def page_recommend_service():
         border-radius: 20px;
         margin: 5px 0;
         max-width: 70%;
-        margin-left: 0; /* 왼쪽 정렬 */
+        margin-left: 0;
         text-align: left;
         font-weight: bold;
         box-shadow: 2px 2px 6px rgba(0,0,0,0.1);
@@ -818,7 +811,7 @@ def page_recommend_service():
     # ─────────────────────────────────────────────────────────────────────
     # 3) 네비게이션 바 (기존 그대로)
     # ─────────────────────────────────────────────────────────────────────
-    col_back, col_title, col_btns = st.columns([2, 5, 2])
+    col_back, col_title, col_btns = st.columns([1, 4, 2])
     with col_back:
         if st.button("◀", key="back_recommend"):
             st.session_state.page = "home"; st.rerun()
@@ -846,18 +839,18 @@ def page_recommend_service():
                         )
                         pref_resp.raise_for_status()
 
-                        # 추천 요청
+                        # 생성된 벡터를 사용해서 추천 요청
                         rec_resp = requests.post(
                             "http://localhost:8005/recommend/caregiver",
                             json={
-                                "email": st.session_state.user_email,
-                                "emotion": st.session_state.current_emotion
+                                "history": history,
+                                "vectors": pref_resp.json()["vectors"]
                             }
                         )
                         rec_resp.raise_for_status()
 
                         # 결과 저장 및 화면 전환
-                        st.session_state.recommendations = rec_resp.json().get("recommendations", [])
+                        st.session_state.recommendation_result = rec_resp.json()
                         st.session_state.page = "recommend_result"
                         st.rerun()
 
@@ -875,7 +868,6 @@ def page_recommend_service():
         cls = "user-bubble" if msg["role"]=="user" else "assistant-bubble"
         tag = "Q:" if msg["role"]=="user" else "A:"
         messages_html += f'<div class="{cls}"><strong>{tag}</strong> {msg["content"]}</div>'
-    # 여기에 바로 로딩 배너를 추가
     if st.session_state.waiting_for_recommend_response:
         messages_html += '<div class="loading-bubble">답변 생성 중...</div>'
     messages_html += '<div id="chat-end"></div></div>'
@@ -903,7 +895,7 @@ def page_recommend_service():
         hist = st.session_state.emotion_history + [emo.get("sadness",0)]
         st.session_state.emotion_history = hist[-10:]
         st.session_state.waiting_for_recommend_response = True
-        st.session_state.recommend_input = ""  # 입력창 초기화
+        st.session_state.recommend_input = ""
 
     st.text_input("", key="recommend_input", placeholder="궁금한 점을 입력하세요!", on_change=_on_recommend_enter)
 
@@ -917,7 +909,7 @@ def page_recommend_service():
             if emo.get("sadness",0)>0.5:    lead="[기분: 슬픔↑] "
             elif emo.get("anger",0)>0.5:    lead="[기분: 분노↑] "
             resp = requests.post(
-                RAG_API_URL,
+                "http://localhost:8005/recommend/ask",
                 json={"prompt": lead + st.session_state.last_recommend_input, "category":"general_chat"}
             )
         answer = resp.json().get("answer","🚨 응답 없음.")
@@ -930,28 +922,70 @@ def page_recommend_service():
 #############################################
 
 def page_recommend_result():
-    st.markdown("<h3 style='text-align:center;'>🧡 돌보미 추천 결과</h3>", unsafe_allow_html=True)
-
-    recommendations = st.session_state.get("recommendations", [])
-    if not recommendations:
-        st.warning("아직 추천된 돌보미가 없습니다. 먼저 상담 챗봇에서 추천을 받아보세요!")
-        if st.button("◀ 추천 챗봇으로 돌아가기"):
+    st.title("🎯 맞춤 돌보미 추천 결과")
+    
+    if "recommendation_result" not in st.session_state:
+        st.error("추천 결과가 없습니다. 먼저 추천을 진행해주세요.")
+        if st.button("돌아가기"):
             st.session_state.page = "recommend"
-            st.rerun()
         return
-
-    for r in recommendations:
+    
+    result = st.session_state.recommendation_result
+    
+    # CSS 스타일 추가
+    st.markdown("""
+    <style>
+    .recommendation-card {
+        background: white;
+        border-radius: 15px;
+        padding: 20px;
+        margin: 20px 0;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    }
+    .recommendation-title {
+        color: #2c3e50;
+        font-size: 24px;
+        margin-bottom: 15px;
+    }
+    .recommendation-score {
+        color: #e74c3c;
+        font-size: 20px;
+        margin-bottom: 15px;
+    }
+    .recommendation-reason {
+        color: #34495e;
+        font-size: 16px;
+        line-height: 1.6;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+    
+    for i, r in enumerate(result["recommendations"], 1):
+        # 전체 유사도 점수 계산
+        total_similarity = sum(r["category_similarities"].values()) / len(r["category_similarities"])
+        
+        # 추천 이유에서 넘버링 제거
+        explanation = re.sub(r'\d+\.\s*', '', r["explanation"])
+        
+        # 카드 형태로 표시
         st.markdown(f"""
-        ---
-        **👩‍🍼 {r['name']}** (나이: {r['age']}세)  
-        📝 {r['personality']}  
-        💡 유사도: **{r['similarity'] * 100:.1f}%**
-        """)
-
-    if st.button("◀ 다시 상담 챗봇으로"):
+        <div class="recommendation-card">
+            <div class="recommendation-title">👩‍🍼 {i}순위: {r['name']} ({r['age']}세)</div>
+            <div class="recommendation-score">💯 유사도 점수: {total_similarity:.1%}</div>
+            <div class="recommendation-reason">
+                <strong>💡 추천 이유:</strong><br>
+                {explanation}
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    if st.button("다시 추천하기"):
         st.session_state.page = "recommend"
-        st.rerun()
 
+
+
+
+########################################
 
 
 
