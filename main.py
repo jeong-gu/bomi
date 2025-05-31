@@ -326,7 +326,7 @@ def generate_vectors_from_summary(summary: str) -> Dict[str, List[float]]:
                 "시간 엄수형", "융통성 있는", "신뢰 우선형"
             ]
         }
-
+        sbert_model = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')
         # 요약문을 SBERT로 임베딩
         summary_embedding = sbert_model.encode(summary)
 
@@ -350,7 +350,7 @@ def generate_vectors_from_summary(summary: str) -> Dict[str, List[float]]:
             
             # category_embeddings[category] = similarities.tolist()
             
-            # 기존 min-max 정규화 대신 softmax 사용
+            # softmax 사용
             similarities = np.array(similarities)
             softmax_similarities = softmax(similarities)
             category_embeddings[category] = softmax_similarities.tolist()
@@ -606,11 +606,11 @@ async def recommend_caregiver(req: RecommendationRequest, db: Session = Depends(
         print(traceback.format_exc())
         raise HTTPException(status_code=500, detail=str(e))
 
-# ✅ 벡터 DB 경로 설정 (vectorDB 폴더에 chroma.sqlite3 포함)
+# 벡터 DB 경로 설정 (vectorDB 폴더에 chroma.sqlite3 포함)
 VECTOR_DB_DIR = os.path.join(os.path.dirname(__file__), "vectorDB")
 embedding_model = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
 
-# ✅ 벡터 DB 로드
+# 벡터 DB 로드
 vector_db = Chroma(
     persist_directory=VECTOR_DB_DIR,
     embedding_function=embedding_model
@@ -677,7 +677,7 @@ def get_parent_info(email: str, db: Session = Depends(get_db)):
         "gov_support_fee": parent.gov_support_fee
     }
 
-# ✅ 돌보미 대화 → GPT 응답 생성 (RAG)
+#  돌보미 대화 → GPT 응답 생성 (RAG)
 @app.post("/rag/")
 def caregiver_rag_response(req: QueryRequest):
     try:
