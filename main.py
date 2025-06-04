@@ -39,8 +39,7 @@ Base.metadata.create_all(bind=engine)
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-# 리뷰 API URL (Streamlit 쪽에서 사용)
-REVIEW_API_URL = "http://localhost:8005/reviews"
+ 
 
 class QueryRequest(BaseModel):
     prompt: str
@@ -326,6 +325,7 @@ def generate_vectors_from_summary(summary: str) -> Dict[str, List[float]]:
                 "시간 엄수형", "융통성 있는", "신뢰 우선형"
             ]
         }
+        # SBERT 모델 초기화
         sbert_model = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')
         # 요약문을 SBERT로 임베딩
         summary_embedding = sbert_model.encode(summary)
@@ -343,12 +343,6 @@ def generate_vectors_from_summary(summary: str) -> Dict[str, List[float]]:
                     np.linalg.norm(summary_embedding) * np.linalg.norm(trait_emb)
                 )
                 similarities.append(float(similarity))
-            
-            # # 유사도를 0~1 범위로 정규화
-            # similarities = np.array(similarities)
-            # similarities = (similarities - similarities.min()) / (similarities.max() - similarities.min() + 1e-8)
-            
-            # category_embeddings[category] = similarities.tolist()
             
             # softmax 사용
             similarities = np.array(similarities)

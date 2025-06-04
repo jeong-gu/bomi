@@ -19,13 +19,13 @@ if "emotion_history" not in st.session_state:
     st.session_state.emotion_history = []  # 슬픔 추이만 담을 경우
 
 
-
+backend_url = "https://bomi-fastapi.onrender.com"
 
 # 1) 전역 설정 & 세션 상태 초기화
 ############################################
 st.set_page_config(page_title="나만의 아이돌, 보미", page_icon="☁️", layout="centered")
 
-RAG_API_URL = "http://localhost:8005/rag/"
+RAG_API_URL = f"{st.secrets['backend_url']}/rag/"
 
 # --------------------------- 세션 기본값 ---------------------------
 if "page" not in st.session_state:
@@ -171,7 +171,7 @@ def page_caregiver_personality():
                 with st.spinner("성향 분석 및 저장 중..."):
                     try:
                         res1 = requests.post(
-                            "http://localhost:8005/caregiver/personality/from-chat",
+                            f"{st.secrets['backend_url']}/caregiver/personality/from-chat",
                             json={"email": st.session_state.user_email, "history": history}
                         )
                         res1.raise_for_status()
@@ -205,7 +205,7 @@ def page_caregiver_personality():
 
                         # 서버에 업데이트 요청
                         res2 = requests.post(
-                            "http://localhost:8005/caregiver/update-vectors",
+                            f"{st.secrets['backend_url']}/caregiver/update-vectors",
                             json={"email": st.session_state.user_email, **vectors}
                         )
                         res2.raise_for_status()
@@ -250,7 +250,7 @@ def page_caregiver_personality():
     if st.session_state.waiting_for_trait_response:
         with st.spinner("답변 생성 중..."):
             resp = requests.post(
-                "http://localhost:8005/caregiver/ask", 
+                f"{st.secrets['backend_url']}/caregiver/ask", 
                 json={"prompt": st.session_state.last_caregiver_self_input,
                       "category": "caregiver_personality"}
             )
@@ -287,7 +287,7 @@ def page_start():
 
         if st.button("로그인"):
             try:
-                response = requests.post("http://localhost:8005/login", json={
+                response = requests.post(f"{st.secrets['backend_url']}/login", json={
                     "email": login_email,
                     "password": login_pw
                 })
@@ -339,7 +339,7 @@ def page_start():
                     "role": "고객"
                 }
                 try:
-                    response = requests.post("http://localhost:8005/register", json=payload)
+                    response = requests.post(f"{st.secrets['backend_url']}/register", json=payload)
                     if response.status_code == 200:
                         st.success("회원가입 성공! 로그인 해주세요.")
                     else:
@@ -473,7 +473,7 @@ def page_start():
                         }
 
                         try:
-                            res = requests.post("http://localhost:8005/register", json=payload)
+                            res = requests.post(f"{st.secrets['backend_url']}/register", json=payload)
                             res.raise_for_status()
                             st.session_state.user_email = payload["email"]
 
@@ -898,14 +898,14 @@ def page_recommend_service():
                     with st.spinner("👀 성향 분석 및 돌보미 추천 중..."):
                         # 성향 분석 요청
                         pref_resp = requests.post(
-                            "http://localhost:8005/user/preference/from-chat",
+                            f"{st.secrets['backend_url']}/user/preference/from-chat",
                             json={"email": st.session_state.user_email, "history": history}
                         )
                         pref_resp.raise_for_status()
 
                         # 생성된 벡터를 사용해서 추천 요청
                         rec_resp = requests.post(
-                            "http://localhost:8005/recommend/caregiver",
+                            f"{st.secrets['backend_url']}/recommend/caregiver",
                             json={
                                 "history": history,
                                 "vectors": pref_resp.json()["vectors"],
@@ -953,7 +953,7 @@ def page_recommend_service():
         st.session_state.recommend_messages.append({"role":"user","content":ui})
         st.session_state.last_recommend_input = ui
         emo = requests.post(
-            "http://localhost:8005/emotion/",
+            f"{st.secrets['backend_url']}/emotion/",
             json={"prompt": ui, "category":"general_chat"}
         ).json().get("scores",{})
         st.session_state.current_emotion = emo
@@ -974,7 +974,7 @@ def page_recommend_service():
             if emo.get("sadness",0)>0.5:    lead="[기분: 슬픔↑] "
             elif emo.get("anger",0)>0.5:    lead="[기분: 분노↑] "
             resp = requests.post(
-                "http://localhost:8005/recommend/ask",
+                f"{st.secrets['backend_url']}/recommend/ask",
                 json={"prompt": lead + st.session_state.last_recommend_input, "category":"general_chat"}
             )
         answer = resp.json().get("answer","🚨 응답 없음.")
@@ -1396,7 +1396,7 @@ def page_caregiver_list():
             try:
                 # FastAPI 서버의 /reviews/ 엔드포인트 호출
                 response = requests.post(
-                    "http://localhost:8005/reviews/",
+                    f"{st.secrets['backend_url']}/reviews/",
                     json={
                         "caregiver_id": st.session_state.matched_id,
                         "parent_name": st.session_state.get("user_name", "부모님"),
@@ -1717,7 +1717,7 @@ def page_caregiver_conditions():
                 "age_max": age_range[1]
             }
             try:
-                res = requests.post("http://localhost:8005/caregiver/update-conditions", json=update_payload)
+                res = requests.post(f"{st.secrets['backend_url']}/caregiver/update-conditions", json=update_payload)
                 res.raise_for_status()
                 st.success("조건이 성공적으로 저장되었습니다.")
             except requests.exceptions.RequestException as e:
