@@ -3,7 +3,8 @@ import pickle
 from typing import Optional
 from fastapi import FastAPI, HTTPException, Depends
 from pydantic import BaseModel
-from langchain_huggingface import HuggingFaceEmbeddings
+#from langchain_huggingface import HuggingFaceEmbeddings
+from langchain.embeddings import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
 from dotenv import load_dotenv
 import os
